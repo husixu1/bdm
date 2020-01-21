@@ -1,10 +1,11 @@
 #!/bin/bash
 
-set -euo pipefail # Strict mode
-
 source .lib/utils.sh
 
-DOTFILES_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" || exit; pwd)
+DOTFILES_ROOT=$(
+    cd "$(dirname "${BASH_SOURCE[0]}")" || exit
+    pwd
+)
 export DOTFILES_ROOT
 
 install() {
@@ -28,27 +29,42 @@ install() {
     alldirs=("$@")
     [[ $1 == 'all' ]] && mapfile -t alldirs < <(ls)
 
-
-    printError(){
-        error "'$dir' installation failed"
-    }
-    trap printError EXIT
     for dir in "${alldirs[@]}"; do
-        # shellcheck source=vim/bootstrap.sh
         [ -f "$dir/bootstrap.sh" ] && {
-            source "$dir/bootstrap.sh"
-            installSystemPackages "${require[@]}"
-
-            type prepare >/dev/null 2>&1 && prepare
-            type install >/dev/null 2>&1 && install
+            (# run in subshell. exit when any error happens
+                set -e
+                # shellcheck source=vim/bootstrap.sh
+                source "$dir/bootstrap.sh"
+                installSystemPackages "${require[@]}"
+                type prepare >/dev/null 2>&1 && prepare
+                type install >/dev/null 2>&1 && install
+            )
+            # We can't use `(set -e;cmd1;cmd2;...;) || warning ...` or if-else here.
+            # see https://stackoverflow.com/questions/29532904/bash-subshell-errexit-semantics
+            [[ $? == 0 ]] || warning "Failed installing $dir"
         }
     done
-    trap - EXIT
 }
 
 uninstall() {
+    alldirs=("$@")
+    [[ $1 == 'all' ]] && {
+        mapfile -t alldirs < <(ls)
+        echo -n 'Uninstall everything? [y/N]: '
+        read -r ans
+        [[ $ans == y ]] || exit 0
+    }
+
     for dir in "${alldirs[@]}"; do
-        echo "$dir"
+        # shellcheck source=vim/bootstrap.sh
+        [ -f "$dir/bootstrap.sh" ] && {
+            (
+                set -e
+                source "$dir/bootstrap.sh"
+                type uninstall >/dev/null 2>&1 && uninstall
+            )
+            [[ $? == 0 ]] || warning "Failed uninstalling $dir"
+        }
     done
 }
 
