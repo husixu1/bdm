@@ -26,6 +26,10 @@ warning() {
     echo "BOOTSTRAP-WRN: " "$@" >/dev/stderr
 }
 
+info(){
+    echo "BOOTSTRAP-INF: " "$@" >/dev/stdout
+}
+
 # From https://unix.stackexchange.com/questions/6345/how-can-i-get-distribution-name-and-version-number-in-a-simple-shell-script
 distro() {
     if [ -f /etc/os-release ]; then

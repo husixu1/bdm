@@ -53,7 +53,15 @@ removeSymLink() {
 #
 # This function must be run in a transaction
 # insall symlink, otherwise rollback
-transactionInstallSymlink(){
+transactionInstallSymlink() {
     action installSymLink "$1" "$2" --- removeSymLink "$1" "$2"
 }
 
+# $1: source file/directory
+# $2: target file/directory (a symlink)
+#
+# This function must be run in a transaction
+# insall symlink, otherwise rollback
+transactionRemoveSymlink() {
+    action removeSymLink "$1" "$2" --- installSymLink "$1" "$2"
+}
