@@ -171,7 +171,7 @@ dispatchCommand() {
         }
 
         (# run in subshell. exit when any error happens
-            set -euo pipefail
+            set -eo pipefail
 
             # shellcheck source=./vim/bootstrap.sh
             source "$DOTFILES_ROOT/$package/bootstrap.sh"
