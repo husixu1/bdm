@@ -18,47 +18,59 @@ export LOCAL_CONFIG_DIR="${XDG_CONFIG_HOME:-"$HOME/.config"}"
 #     sudo pacman -S --needed --noconfirm "$@"
 # }
 
-# $1: transaction name
-newTransaction() {
-#    declare -a "$1_COMMAND"
-    declare -a "$1_ROLLBACK"
-}
-
-# $1 transaction name
-setCurTransaction() {
-#    _TRANSACTION_COMMAND=$1_COMMAND
-    _TRANSACTION_ROLLBACK=$1_ROLLBACK
+# start new transaction
+transaction() {
+    [[ -z ${_ROLLBACKS+x} ]] || {
+        error "Already in transaction"
+        return 1
+    }
+    _ROLLBACKS=("true")
 }
 
 #1 transaction name
 commit() {
-    unset "$1_COMMAND"
-    unset "$1_ROLLBACK"
-    unset _TRANSACTION_ROLLBACK
+    [[ -z ${_ROLLBACKS+x} ]] && {
+        error "Commit when not in transaction"
+        return 1
+    }
+    unset _ROLLBACKS
 }
 
 rollback() {
-    local rollbackCount=${#_TRANSACTION_ROLLBACK[@]}
+    [[ -z ${_ROLLBACKS+x} ]] && {
+        error "Rollback when not in transaction"
+        return 1
+    }
+
+    local rollbackCount=${#_ROLLBACKS[@]}
     # execute the rollback stack in reverse
     for ((i=0; i<rollbackCount; ++i)); do
-        local rollbackCommand
-        eval "rollbackCommand=(${_TRANSACTION_ROLLBACK[$((rollbackCount-i))]})"
-        $rollbackCommand
+        local -a rollbackCommand
+        eval "rollbackCommand=(${_ROLLBACKS[$((rollbackCount-i-1))]})"
+        "${rollbackCommand[@]}"
     done
+    unset _ROLLBACKS
 }
 
 # params before `---`: action command
 # params after `---`: rollback command
 action() {
-    local state="command"
-    local actionParamCount=0
+    [[ -z ${_ROLLBACKS+x} ]] && {
+        error "Try to perform action when not in transaction"
+        return 1
+    }
+
+    local actionParamCount=1
     for param in "$@"; do
-        [[ ${state} == "command" && ${param} == "---" ]] && break;
+        [[ ${param} == "---" ]] && break;
         ((++actionParamCount))
     done
 
-    # _TRANSACTION_COMMAND+=$(printf "%q " "${@::${actionParamCount}}")
-    _TRANSACTION_ROLLBACK+=$(printf "%q " "${@:$((actionParamCount+1))}")
+    # Add rollback to rollback list
+    _ROLLBACKS+=("$(printf "%q " "${@:$((actionParamCount+1))}")")
+
+    # perform action
+    "${@:1:$((actionParamCount-1))}"
 }
 
 
