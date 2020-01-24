@@ -14,10 +14,6 @@ export LOCAL_CONFIG_DIR="${XDG_CONFIG_HOME:-"$HOME/.config"}"
 #     return $result
 # }
 
-# installSystemPackages() {
-#     sudo pacman -S --needed --noconfirm "$@"
-# }
-
 error() {
     echo "BOOTSTRAP-ERR: " "$@" >/dev/stderr
 }
@@ -26,43 +22,53 @@ warning() {
     echo "BOOTSTRAP-WRN: " "$@" >/dev/stderr
 }
 
-info(){
+info() {
     echo "BOOTSTRAP-INF: " "$@" >/dev/stdout
 }
 
 # From https://unix.stackexchange.com/questions/6345/how-can-i-get-distribution-name-and-version-number-in-a-simple-shell-script
 distro() {
-    if [ -f /etc/os-release ]; then
-        # freedesktop.org and systemd
-        . /etc/os-release
-        OS=$NAME
-        VER=$VERSION_ID
-    elif type lsb_release >/dev/null 2>&1; then
-        # linuxbase.org
-        OS=$(lsb_release -si)
-        VER=$(lsb_release -sr)
-    elif [ -f /etc/lsb-release ]; then
-        # For some versions of Debian/Ubuntu without lsb_release command
-        . /etc/lsb-release
-        OS=$DISTRIB_ID
-        VER=$DISTRIB_RELEASE
-    elif [ -f /etc/debian_version ]; then
-        # Older Debian/Ubuntu/etc.
-        OS=Debian
-        VER=$(cat /etc/debian_version)
-    elif [ -f /etc/SuSe-release ]; then
-        # Older SuSE/etc.
-        ...
-    elif [ -f /etc/redhat-release ]; then
-        # Older Red Hat, CentOS, etc.
-        ...
-    else
-        # Fall back to uname, e.g. "Linux <version>", also works for BSD, etc.
-        OS=$(uname -s)
-        VER=$(uname -r)
-    fi
+    (
+        if [ -f /etc/os-release ]; then
+            # freedesktop.org and systemd
+            . /etc/os-release
+            OS=$NAME
+            VER=$VERSION_ID
+        elif type lsb_release >/dev/null 2>&1; then
+            # linuxbase.org
+            OS=$(lsb_release -si)
+            VER=$(lsb_release -sr)
+            VER=${VER%.*}
+        elif [ -f /etc/lsb-release ]; then
+            # For some versions of Debian/Ubuntu without lsb_release command
+            . /etc/lsb-release
+            OS=$DISTRIB_ID
+            VER=$DISTRIB_RELEASE
+            VER=${VER%.*}
+        elif [ -f /etc/debian_version ]; then
+            # Older Debian/Ubuntu/etc.
+            OS=Debian
+            VER=$(cat /etc/debian_version)
+            VER=${VER%.*}
+        else
+            # Fall back to uname, e.g. "Linux <version>", also works for BSD, etc.
+            OS=$(uname -s)
+            VER=$(uname -r)
+        fi
 
-    [[ ${OS} =~ ^Arch.* ]] && echo "arch"
-    [[ ${OS} =~ ^Debian ]] && echo "debian${VER}"
-    # Add more os supports here
+        [[ ${OS} =~ ^Arch || ${OS} =~ ^Manjaro ]] && echo "arch"
+        [[ ${OS} =~ ^Debian ]] && echo "debian_${VER}"
+        [[ ${OS} =~ ^Linux ]] && echo "linux" # general linux
+    )
+}
+
+install_system_package_arch() { sudo pacman -S --needed --noconfirm "$@"; }
+install_system_package_debian_7() { sudo apt-get install --yes "$@"; }
+install_system_package_debian_8() { sudo apt-get install --yes "$@"; }
+install_system_package_debian_9() { sudo apt-get install --yes "$@"; }
+install_system_package_debian_10() { sudo apt-get install --yes "$@"; }
+install_system_package_debian_11() { sudo apt-get install --yes "$@"; }
+install_system_package_linux() {
+    # TODO: maybe flatpak?
+    warning "General linux package not supported"
 }

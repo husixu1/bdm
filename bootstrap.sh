@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# requires bash > 4.3
+
 DOTFILES_ROOT=$(
     cd "$(dirname "${BASH_SOURCE[0]}")" || exit
     pwd
@@ -56,6 +58,7 @@ _HELP_MESSAGE="\
 "
 
 _OPTION_PATTERN='--?[[:alnum:]][[:alnum:]-]*$'
+_DISTRO=$(distro)
 
 dispatchCommand() {
     [[ $# -eq 0 ]] && {
@@ -150,7 +153,7 @@ dispatchCommand() {
     ############################################################################
 
     # Scan for all `bootstrap.sh` and run them
-    packages=("$@")
+    local packages=("$@")
 
     [[ $1 == 'all' ]] && mapfile -t packages < <(ls)
 
@@ -163,15 +166,15 @@ dispatchCommand() {
         }
 
         (# run in subshell. exit when any error happens
-            set -e
+            set -euo pipefail
 
             # shellcheck source=./vim/bootstrap.sh
             source "$DOTFILES_ROOT/$package/bootstrap.sh"
 
             # Check dependency files before installing
-            declare -a missing_files
+            declare -a missing_files=()
             [[ $cmd == "install" ]] && $opt_i_checkdeps && {
-                declare -a virtual_files
+                declare -a virtual_files=()
                 for item in "${depends[@]}"; do
                     if [[ $item =~ f[[:alnum:]]*:[[:print:]]+ ]]; then
                         # item is a file
@@ -195,24 +198,25 @@ dispatchCommand() {
 
             # Install dependencies
             [[ $cmd == "install" ]] && $opt_i_installdeps && {
-                # copy packages_<distro> list to `packages_list`
-                distro=arch # TODO: get and formalize reliabe distro info
-                declare -a package_list
-                eval "packages_list=(\${packages_${distro}[@]})"
+                # define `packages_list` to be the nameref of packages_<distro>
+                declare -nr packages_list="packages_${_DISTRO}"
+                echo "------${packages_list[*]}"
 
                 # Install packages
                 for file in "${missing_files[@]}"; do
-                    syspkg=${package_list[$file]}
-                    [[ -z $syspkg ]] || {
+                    declare syspkg=${packages_list[$file]}
+                    if [[ -n $syspkg ]]; then
                         if [[ $syspkg =~ f[[:alnum:]]*:[[:print:]]+ ]]; then
                             # package should be installed through function
                             ${syspkg#f*:}
                         else
-                            # package should be installed through system
-                            : # TODO: complete different package installation
-                            # install_system_package_<distro> ${syspkg#s*:}
+                            # package should be installed through system package manager
+                            install_pkg_command="install_system_package_${_DISTRO} ${syspkg#s*:}"
+                            ${install_pkg_command}
                         fi
-                    }
+                    else
+                        warning "Cannot install package to meet dependency '${file}'"
+                    fi
                 done
             }
 
