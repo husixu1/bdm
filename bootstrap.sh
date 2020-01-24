@@ -1,6 +1,11 @@
 #!/bin/bash
 
-# requires bash > 4.3
+# This script requires bash >= 4.3, since it uses `declare -n`
+if [[ ${BASH_VERSINFO[0]} -lt 4 ]] ||
+    [[ ${BASH_VERSINFO[0]} -eq 4 && ${BASH_VERSINFO[1]} -lt 3 ]]; then
+    echo "This script requires Bash version >= 4.3"
+    exit 1
+fi
 
 DOTFILES_ROOT=$(
     cd "$(dirname "${BASH_SOURCE[0]}")" || exit
