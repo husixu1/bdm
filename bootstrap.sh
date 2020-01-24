@@ -1,7 +1,5 @@
 #!/bin/bash
 
-set -euo pipefail
-
 DOTFILES_ROOT=$(
     cd "$(dirname "${BASH_SOURCE[0]}")" || exit
     pwd
@@ -10,7 +8,6 @@ export DOTFILES_ROOT
 
 # shellcheck source=./.lib/utils.sh
 source "${DOTFILES_ROOT}/.lib/utils.sh"
-
 
 #    # At least `sudo` is needed
 #    command -v sudo >/dev/null 2>&1 || {
@@ -49,7 +46,7 @@ dispatchCommand (){
             # We can't use `(set -e;cmd1;cmd2;...;) || warning ...` or if-else here.
             # see https://stackoverflow.com/questions/29532904/bash-subshell-errexit-semantics
             # shellcheck disable=SC2181
-            [[ $? == 0 ]] || warning "Failed installing $package"
+            [[ $? == 0 ]] || warning "Failed ${cmd}ing $package"
         }
     done
 }
