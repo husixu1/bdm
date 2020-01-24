@@ -2,6 +2,8 @@
 
 #shellcheck source=./transaction.sh
 source "$(dirname "${BASH_SOURCE[0]}")"/transaction.sh
+#shellcheck source=./utils.sh
+source "$(dirname "${BASH_SOURCE[0]}")"/utils.sh
 
 # $1: source file/directory
 # $2: target file/directory (a symlink)
@@ -35,9 +37,12 @@ installSymLink() {
 # If `target` does not exists, nothing happens and 0 is returned
 removeSymLink() {
     # target does not exists
-    [[ -e "$2" ]] && return 0
+    [[ -e "$2" ]] || return 0
     # target is not a symlink or source and target is not the same file
-    [[ ! -L "$2" || ! $1 -ef $2 ]] && return 1
+    [[ -L "$2" && $1 -ef $2 ]] || {
+        error "Link $2 is not managed by this repo"
+        return 1
+    }
 
     # try unlink target
     unlink "$2"

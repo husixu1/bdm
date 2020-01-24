@@ -29,49 +29,29 @@ source "${DOTFILES_ROOT}/.lib/utils.sh"
 #    done 2>/dev/null &
 #
 
-install() {
-    # Scan for all `bootstrap.sh` and run them
-    alldirs=("$@")
-    [[ $1 == 'all' ]] && mapfile -t alldirs < <(ls)
+dispatchCommand (){
+    cmd=$1
+    shift
 
-    for dir in "${alldirs[@]}"; do
-        [ -f "$dir/bootstrap.sh" ] && {
+    # Scan for all `bootstrap.sh` and run them
+    packages=("$@")
+
+    [[ $1 == 'all' ]] && mapfile -t packages < <(ls)
+
+    for package in "${packages[@]}"; do
+        [ -f "$DOTFILES_ROOT/$package/bootstrap.sh" ] && {
             (# run in subshell. exit when any error happens
                 set -e
                 # shellcheck source=./vim/bootstrap.sh
-                source "$dir/bootstrap.sh"
-                type install >/dev/null 2>&1 && install ""
+                source "$DOTFILES_ROOT/$package/bootstrap.sh"
+                type "$cmd" >/dev/null 2>&1 && $cmd
             )
             # We can't use `(set -e;cmd1;cmd2;...;) || warning ...` or if-else here.
             # see https://stackoverflow.com/questions/29532904/bash-subshell-errexit-semantics
             # shellcheck disable=SC2181
-            [[ $? == 0 ]] || warning "Failed installing $dir"
+            [[ $? == 0 ]] || warning "Failed installing $package"
         }
     done
 }
 
-uninstall() {
-    alldirs=("$@")
-    [[ $1 == 'all' ]] && {
-        mapfile -t alldirs < <(ls)
-        echo -n 'Uninstall everything? [y/N]: '
-        read -r ans
-        [[ $ans == y ]] || exit 0
-    }
-
-    for dir in "${alldirs[@]}"; do
-        # shellcheck source=vim/bootstrap.sh
-        [ -f "$dir/bootstrap.sh" ] && {
-            (
-                set -e
-                source "$dir/bootstrap.sh"
-                type uninstall >/dev/null 2>&1 && uninstall ""
-            )
-
-            # shellcheck disable=SC2181
-            [[ $? == 0 ]] || warning "Failed uninstalling $dir"
-        }
-    done
-}
-
-"$@"
+dispatchCommand "$@"
