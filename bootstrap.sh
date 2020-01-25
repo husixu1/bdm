@@ -180,13 +180,15 @@ dispatchCommand() {
             [[ $cmd == "install" ]] && $opt_i_checkdeps && {
                 declare -a virtual_files=()
                 for item in "${depends[@]}"; do
-                    if [[ $item =~ f[[:alnum:]]*:[[:print:]]+ ]]; then
+                    if [[ $item =~ fi[[:alnum:]]*:[[:print:]]+ ]]; then
                         # item is a file
-                        [[ -e "${item#f*:}" ]] ||
-                            missing_files+=("${item}")
+                        [[ -e "${item#fi*:}" ]] || missing_files+=("${item}")
                     elif [[ $item =~ v[[:alnum:]]*:[[:print:]]+ ]]; then
                         # item is virtual
                         virtual_files+=("${item}")
+                    elif [[ $item =~ fu[[:alnum:]]*:[[:print:]]+ ]]; then
+                        # Use a function to judge if item exists
+                        ${item#fu*:} || missing_files+=("${item}")
                     else
                         # item is a executable
                         command -v "${item#e*:}" >/dev/null 2>&1 ||

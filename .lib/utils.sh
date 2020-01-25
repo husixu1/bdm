@@ -61,6 +61,8 @@ distro() {
     return 0
 }
 
+check_system_package_arch() { pacman -Q "$1" >/dev/null 2>&1; }
+check_system_package_debian(){ dpkg -s "$1" >/dev/null 2>&1; }
 install_system_package_arch() { sudo pacman -S --needed --noconfirm "$@"; }
 install_system_package_debian_7() { sudo apt-get install --yes "$@"; }
 install_system_package_debian_8() { sudo apt-get install --yes "$@"; }
