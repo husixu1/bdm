@@ -78,8 +78,8 @@ _HELP_MESSAGE="\
 "
 
 # shellcheck disable=SC2016
-_BOOTSTRAP_TEMPLATE='\
-#!/bin/bash
+_BOOTSTRAP_TEMPLATE="\
+"'#!/bin/bash
 
 THISDIR=$(
     cd "$(dirname "${BASH_SOURCE[0]}")" || exit
