@@ -78,7 +78,7 @@ _HELP_MESSAGE="\
 "
 
 # shellcheck disable=SC2016
-_BOOTSTRAP_TEMPLATE='
+_BOOTSTRAP_TEMPLATE='\
 #!/bin/bash
 
 THISDIR=$(
@@ -218,6 +218,7 @@ dispatchCommand() {
         info "Creating package '$1'"
         mkdir -p "$DOTFILES_ROOT/$1"
         echo "$_BOOTSTRAP_TEMPLATE" > "$DOTFILES_ROOT/$1/bootstrap.sh"
+        return 0
     }
 
     # Install/Uninstall/Check packages #########################################
