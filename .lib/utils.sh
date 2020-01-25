@@ -13,15 +13,15 @@
 # }
 
 error() {
-    echo "BOOTSTRAP-ERR: " "$@" >/dev/stderr
+    echo "BOOTSTRAP-ERR: " "$@" >&2
 }
 
 warning() {
-    echo "BOOTSTRAP-WRN: " "$@" >/dev/stderr
+    echo "BOOTSTRAP-WRN: " "$@" >&2
 }
 
 info() {
-    echo "BOOTSTRAP-INF: " "$@" >/dev/stdout
+    echo "BOOTSTRAP-INF: " "$@" >&1
 }
 
 # From https://unix.stackexchange.com/questions/6345/how-can-i-get-distribution-name-and-version-number-in-a-simple-shell-script
