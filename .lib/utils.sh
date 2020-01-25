@@ -48,6 +48,9 @@ distro() {
             OS=Debian
             VER=$(cat /etc/debian_version)
             VER=${VER%.*}
+        elif command -v termux-setup-storage >/dev/null 2>&1; then
+            OS="Termux"
+            VER=$(uname -r)
         else
             # Fall back to uname, e.g. "Linux <version>", also works for BSD, etc.
             OS=$(uname -s)
@@ -56,6 +59,7 @@ distro() {
 
         [[ ${OS} =~ ^Arch || ${OS} =~ ^Manjaro ]] && echo "arch"
         [[ ${OS} =~ ^Debian ]] && echo "debian_${VER}"
+        [[ ${OS} == Termux ]] && echo "termux"
         [[ ${OS} =~ ^Linux ]] && echo "linux" # general linux
     )
     return 0
