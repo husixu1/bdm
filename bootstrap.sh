@@ -63,7 +63,6 @@ _HELP_MESSAGE="\
 "
 
 _OPTION_PATTERN='--?[[:alnum:]][[:alnum:]-]*$'
-_DISTRO=$(distro)
 
 dispatchCommand() {
     [[ $# -eq 0 ]] && {
@@ -158,15 +157,15 @@ dispatchCommand() {
     ############################################################################
 
     # Scan for all `bootstrap.sh` and run them
-    local packages=("$@")
+    local -a dirs=("$@")
 
-    [[ $1 == 'all' ]] && mapfile -t packages < <(ls)
+    [[ $1 == 'all' ]] && mapfile -t dirs < <(ls "${DOTFILES_ROOT}")
 
-    for package in "${packages[@]}"; do
-        info "Processing ${package}"
+    for dir in "${dirs[@]}"; do
+        info "Processing $dir"
 
-        [ -f "$DOTFILES_ROOT/$package/bootstrap.sh" ] || {
-            warning "Cannot find $package/bootstrap.sh. Processing aborted"
+        [ -f "$DOTFILES_ROOT/$dir/bootstrap.sh" ] || {
+            warning "Cannot find $dir/bootstrap.sh. Processing aborted."
             continue
         }
 
@@ -174,7 +173,7 @@ dispatchCommand() {
             set -eo pipefail
 
             # shellcheck source=./vim/bootstrap.sh
-            source "$DOTFILES_ROOT/$package/bootstrap.sh"
+            source "$DOTFILES_ROOT/$dir/bootstrap.sh"
 
             # Check dependency files before installing
             declare -a missing_files=()
@@ -203,20 +202,16 @@ dispatchCommand() {
 
             # Install dependencies
             [[ $cmd == "install" ]] && $opt_i_installdeps && {
-                # define `packages_list` to be the nameref of packages_<distro>
-                declare -nr packages_list="packages_${_DISTRO}"
-                echo "------${packages_list[*]}"
-
                 # Install packages
                 for file in "${missing_files[@]}"; do
-                    declare syspkg=${packages_list[$file]}
-                    if [[ -n $syspkg ]]; then
-                        if [[ $syspkg =~ f[[:alnum:]]*:[[:print:]]+ ]]; then
+                    declare pkg=${packages[$file]}
+                    if [[ -n $pkg ]]; then
+                        if [[ $pkg =~ f[[:alnum:]]*:[[:print:]]+ ]]; then
                             # package should be installed through function
-                            ${syspkg#f*:}
+                            ${pkg#f*:}
                         else
                             # package should be installed through system package manager
-                            install_pkg_command="install_system_package_${_DISTRO} ${syspkg#s*:}"
+                            install_pkg_command="install_system_package_${DISTRO} ${pkg#s*:}"
                             ${install_pkg_command}
                         fi
                     else
@@ -231,7 +226,7 @@ dispatchCommand() {
         # We can't use `(set -e;cmd1;cmd2;...;) || warning ...` or if-else here.
         # see https://stackoverflow.com/questions/29532904/bash-subshell-errexit-semantics
         # shellcheck disable=SC2181
-        [[ $? == 0 ]] || warning "Failed ${cmd}ing $package"
+        [[ $? == 0 ]] || warning "Failed ${cmd}ing $dir"
     done
 }
 

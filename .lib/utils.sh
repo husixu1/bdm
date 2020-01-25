@@ -1,7 +1,5 @@
 #!/bin/bash
 
-export LOCAL_CONFIG_DIR="${XDG_CONFIG_HOME:-"$HOME/.config"}"
-
 # $1: package name to be recognized by package manager
 # $2: executable name. defaults to $1
 # return: 0 if package or executable exist. 1 otherwise
@@ -60,6 +58,7 @@ distro() {
         [[ ${OS} =~ ^Debian ]] && echo "debian_${VER}"
         [[ ${OS} =~ ^Linux ]] && echo "linux" # general linux
     )
+    return 0
 }
 
 install_system_package_arch() { sudo pacman -S --needed --noconfirm "$@"; }
@@ -72,3 +71,12 @@ install_system_package_linux() {
     # TODO: maybe flatpak?
     warning "General linux package not supported"
 }
+
+# EXPORTS ######################################################################
+################################################################################
+
+LOCAL_CONFIG_DIR="${XDG_CONFIG_HOME:-"$HOME/.config"}"
+export LOCAL_CONFIG_DIR
+
+DISTRO=$(distro)
+export DISTRO
