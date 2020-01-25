@@ -16,6 +16,12 @@ export DOTFILES_ROOT
 # shellcheck source=./.lib/utils.sh
 source "${DOTFILES_ROOT}/.lib/utils.sh"
 
+# Fake a `sudo' command, since termux does not have a sudo command
+[[ $DISTRO == "termux" ]] && {
+    sudo() { "$@"; }
+    export -f sudo
+}
+
 _HELP_MESSAGE="\
 [1mSYNOPSIS[0m
     ${BASH_SOURCE[0]} [4mCOMMAND[0m [OPTIONS] [4mPKGS[0m...
