@@ -46,6 +46,9 @@ _HELP_MESSAGE="\
     c*, check
         check whether a package is installed
 
+    l*, list
+        list all available packages
+
 [1mOPTIONS (install)[0m
     -n, --no-checkdeps
         Skip dependency checking and install dotfiles anyway. Might cause
@@ -134,14 +137,14 @@ dispatchCommand() {
             shift
         done
         ;;
-
+    l*) cmd="list" ;;
     *)
         error "Command '$cmd' not recognized. Run '${BASH_SOURCE[0]}' for help"
         exit 1
         ;;
     esac
 
-    # Grant and hold root access ###############################################
+    # Require and hold root access #############################################
     ############################################################################
 
     [[ $cmd == "install" ]] && $opt_i_installdeps && {
@@ -162,13 +165,24 @@ dispatchCommand() {
         done 2>/dev/null &
     }
 
+    # Install/List packages ####################################################
+    ############################################################################
+    [[ $cmd == "list" ]] && {
+        while read -r dir; do
+            if [[ -f $DOTFILES_ROOT/$dir/bootstrap.sh ]]; then
+                echo "$dir"
+            fi
+        done < <(ls "$DOTFILES_ROOT")
+        return 0
+    }
+
     # Install/Uninstall/Check packages #########################################
     ############################################################################
 
     # Scan for all `bootstrap.sh` and run them
     local -a dirs=("$@")
 
-    [[ $1 == 'all' ]] && mapfile -t dirs < <(ls "${DOTFILES_ROOT}")
+    [[ $1 == 'all' ]] && mapfile -t dirs < <(ls "$DOTFILES_ROOT")
 
     for dir in "${dirs[@]}"; do
         info "Processing $dir"
@@ -226,7 +240,7 @@ dispatchCommand() {
                             ${install_pkg_command}
                         fi
                     else
-                        warning "Cannot install package to meet dependency '${file}'"
+                        warning "Cannot meet dependency '${file}': it's not defined in the 'packages' dict"
                     fi
                 done
             }
