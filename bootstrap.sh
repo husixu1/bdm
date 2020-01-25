@@ -49,6 +49,9 @@ _HELP_MESSAGE="\
     l*, list
         list all available packages
 
+    n*, new
+        create a new package with template
+
 [1mOPTIONS (install)[0m
     -n, --no-checkdeps
         Skip dependency checking and install dotfiles anyway. Might cause
@@ -73,6 +76,37 @@ _HELP_MESSAGE="\
     all
         all avaliable packages
 "
+
+# shellcheck disable=SC2016
+_BOOTSTRAP_TEMPLATE='
+#!/bin/bash
+
+THISDIR=$(
+    cd "$(dirname "${BASH_SOURCE[0]}")" || exit
+    pwd -P
+)
+
+# shellcheck source=../.lib/utils.sh
+source "$THISDIR/../.lib/utils.sh"
+# shellcheck source=../.lib/symlink.sh
+source "$THISDIR/../.lib/symlink.sh"
+# shellcheck source=../.lib/transaction.sh
+source "$THISDIR/../.lib/transaction.sh"
+
+declare -a depends=()
+export depends
+
+declare -A packages=()
+export packages
+
+install() {
+    :
+}
+
+uninstall() {
+    :
+}
+'
 
 _OPTION_PATTERN='--?[[:alnum:]][[:alnum:]-]*$'
 
@@ -138,6 +172,7 @@ dispatchCommand() {
         done
         ;;
     l*) cmd="list" ;;
+    n*) cmd="new" ;;
     *)
         error "Command '$cmd' not recognized. Run '${BASH_SOURCE[0]}' for help"
         exit 1
@@ -167,6 +202,7 @@ dispatchCommand() {
 
     # Install/List packages ####################################################
     ############################################################################
+
     [[ $cmd == "list" ]] && {
         while read -r dir; do
             if [[ -f $DOTFILES_ROOT/$dir/bootstrap.sh ]]; then
@@ -174,6 +210,14 @@ dispatchCommand() {
             fi
         done < <(ls "$DOTFILES_ROOT")
         return 0
+    }
+
+    # Create a new package #####################################################
+    ############################################################################
+    [[ $cmd == "new" ]] && {
+        info "Creating package '$1'"
+        mkdir -p "$DOTFILES_ROOT/$1"
+        echo "$_BOOTSTRAP_TEMPLATE" > "$DOTFILES_ROOT/$1/bootstrap.sh"
     }
 
     # Install/Uninstall/Check packages #########################################
@@ -185,12 +229,9 @@ dispatchCommand() {
     [[ $1 == 'all' ]] && mapfile -t dirs < <(ls "$DOTFILES_ROOT")
 
     for dir in "${dirs[@]}"; do
-        info "Processing $dir"
+        [ -f "$DOTFILES_ROOT/$dir/bootstrap.sh" ] || continue
 
-        [ -f "$DOTFILES_ROOT/$dir/bootstrap.sh" ] || {
-            warning "Cannot find $dir/bootstrap.sh. Processing aborted."
-            continue
-        }
+        info "Processing $dir"
 
         (# run in subshell. exit when any error happens
             set -eo pipefail
