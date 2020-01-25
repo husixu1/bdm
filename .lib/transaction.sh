@@ -30,7 +30,10 @@ rollback() {
     for ((i = 0; i < rollbackCount; ++i)); do
         local -a rollbackCommand
         eval "rollbackCommand=(${_ROLLBACKS[$((rollbackCount - i - 1))]})"
-        "${rollbackCommand[@]}"
+        "${rollbackCommand[@]}" || {
+            error "Rollback command '${rollbackCommand[*]}' failed."
+            continue
+        }
     done
     unset _ROLLBACKS
 }
@@ -55,5 +58,8 @@ action() {
     _ROLLBACKS+=("$(printf "%q " "${@:$((actionParamCount + 1))}")")
 
     # perform action
-    "${@:1:$((actionParamCount - 1))}" || { rollback && return 1; }
+    "${@:1:$((actionParamCount - 1))}" || {
+        error "Action '${*:1:$((actionParamCount - 1))}' failed. Rolling back..."
+        rollback && return 1;
+    }
 }
