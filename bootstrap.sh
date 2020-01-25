@@ -18,7 +18,10 @@ source "${DOTFILES_ROOT}/.lib/utils.sh"
 
 # Fake a `sudo' command, since termux does not have a sudo command
 [[ $DISTRO == "termux" ]] && {
-    sudo() { "$@"; }
+    sudo() {
+        while [[ $1 =~ ^- ]]; do shift; done
+        "$@"
+    }
     export -f sudo
 }
 
@@ -143,7 +146,7 @@ dispatchCommand() {
 
     [[ $cmd == "install" ]] && $opt_i_installdeps && {
         # At least `sudo` is needed
-        command -v sudo >/dev/null 2>&1 || {
+        type sudo >/dev/null 2>&1 || {
             error "the 'sudo' program is needed for running this script"
             exit 1
         }

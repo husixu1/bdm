@@ -57,22 +57,26 @@ distro() {
             VER=$(uname -r)
         fi
 
-        [[ ${OS} =~ ^Arch || ${OS} =~ ^Manjaro ]] && echo "arch"
-        [[ ${OS} =~ ^Debian ]] && echo "debian_${VER}"
-        [[ ${OS} == Termux ]] && echo "termux"
-        [[ ${OS} =~ ^Linux ]] && echo "linux" # general linux
+        if [[ ${OS} =~ ^Arch || ${OS} =~ ^Manjaro ]]; then echo "arch"
+        elif [[ ${OS} =~ ^Debian ]]; then echo "debian_${VER}"
+        elif [[ ${OS} == Termux ]]; then echo "termux"
+        elif [[ ${OS} =~ ^Linux ]]; then echo "linux" # general linux
+        else echo "unsupported"
+        fi
     )
     return 0
 }
 
 check_system_package_arch() { pacman -Q "$1" >/dev/null 2>&1; }
 check_system_package_debian(){ dpkg -s "$1" >/dev/null 2>&1; }
+
 install_system_package_arch() { sudo pacman -S --needed --noconfirm "$@"; }
 install_system_package_debian_7() { sudo apt-get install --yes "$@"; }
 install_system_package_debian_8() { sudo apt-get install --yes "$@"; }
 install_system_package_debian_9() { sudo apt-get install --yes "$@"; }
 install_system_package_debian_10() { sudo apt-get install --yes "$@"; }
 install_system_package_debian_11() { sudo apt-get install --yes "$@"; }
+install_system_package_termux() { apt install --yes "$@"; }
 install_system_package_linux() {
     # TODO: maybe flatpak?
     warning "General linux package not supported"
