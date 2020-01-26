@@ -1,12 +1,5 @@
 #!/bin/bash
 
-# This script requires bash >= 4.3, since it uses `declare -n`
-if [[ ${BASH_VERSINFO[0]} -lt 4 ]] ||
-    [[ ${BASH_VERSINFO[0]} -eq 4 && ${BASH_VERSINFO[1]} -lt 3 ]]; then
-    echo "This script requires Bash version >= 4.3"
-    exit 1
-fi
-
 DOTFILES_ROOT=$(
     cd "$(dirname "${BASH_SOURCE[0]}")" || exit
     pwd
@@ -15,6 +8,18 @@ export DOTFILES_ROOT
 
 # shellcheck source=./.lib/utils.sh
 source "${DOTFILES_ROOT}/.lib/utils.sh"
+
+# This script requires bash >= 4.3, since it uses `declare -n`
+if [[ ${BASH_VERSINFO[0]} -lt 4 ]] ||
+    [[ ${BASH_VERSINFO[0]} -eq 4 && ${BASH_VERSINFO[1]} -lt 3 ]]; then
+    echo "This script requires Bash version >= 4.3"
+    exit 1
+fi
+
+[[ $EUID -eq 0 ]] && {
+    error "This script cannot be run as root, as it might cause unexpected damage." >&2
+    exit 1
+}
 
 # Fake a `sudo' command, since termux does not have a sudo command
 [[ $DISTRO == "termux" ]] && {
@@ -118,7 +123,6 @@ dispatchCommand() {
 
     # Parse command line #######################################################
     ############################################################################
-
     # get command
     local cmd=$1
     shift
@@ -179,30 +183,8 @@ dispatchCommand() {
         ;;
     esac
 
-    # Require and hold root access #############################################
+    # List packages ############################################################
     ############################################################################
-
-    [[ $cmd == "install" ]] && $opt_i_installdeps && {
-        # At least `sudo` is needed
-        type sudo >/dev/null 2>&1 || {
-            error "the 'sudo' program is needed for running this script"
-            exit 1
-        }
-
-        # Require root previliges
-        sudo -v
-
-        # keep sudo credential cache up-to-date
-        while true; do
-            sudo -n true
-            sleep 60
-            kill -0 "$$" || exit
-        done 2>/dev/null &
-    }
-
-    # Install/List packages ####################################################
-    ############################################################################
-
     [[ $cmd == "list" ]] && {
         while read -r dir; do
             if [[ -f $DOTFILES_ROOT/$dir/bootstrap.sh ]]; then
@@ -217,18 +199,64 @@ dispatchCommand() {
     [[ $cmd == "new" ]] && {
         info "Creating package '$1'"
         mkdir -p "$DOTFILES_ROOT/$1"
-        echo "$_BOOTSTRAP_TEMPLATE" > "$DOTFILES_ROOT/$1/bootstrap.sh"
+        echo "$_BOOTSTRAP_TEMPLATE" >"$DOTFILES_ROOT/$1/bootstrap.sh"
         return 0
     }
 
-    # Install/Uninstall/Check packages #########################################
+    # List/filter packages for install/uninstall/check #########################
     ############################################################################
-
     # Scan for all `bootstrap.sh` and run them
     local -a dirs=("$@")
 
     [[ $1 == 'all' ]] && mapfile -t dirs < <(ls "$DOTFILES_ROOT")
 
+    # Parse tags ###############################################################
+    ############################################################################
+#    require_root=false
+#    for dir in "${dirs[@]}"; do
+#        [ -f "$DOTFILES_ROOT/$dir/bootstrap.sh" ] || continue
+#        (
+#            set -eo pipefail
+#            # shellcheck source=./vim/bootstrap.sh
+#            source "$DOTFILES_ROOT/$dir/bootstrap.sh"
+#
+#            for tag in "${tags[@]}"; do
+#                if [[ $tag == "root" ]]; then
+#                    require_root=true
+#                fi
+#            done
+#        )
+#    done
+
+    # Parse dependency graph ###################################################
+    ############################################################################
+# TODO
+
+    # Require and hold root access #############################################
+    ############################################################################
+#    require_root_failed=false
+    if [[ $cmd == "install" ]]; then
+        if $opt_i_installdeps || $require_root; then
+            # At least `sudo` is needed
+            type sudo >/dev/null 2>&1 || {
+                error "the 'sudo' program is needed for running this script"
+                exit 1
+            }
+
+            # Require root privilege
+            sudo -v || require_root_failed=true
+
+            # keep sudo credential cache up-to-date
+            while true; do
+                sudo -n true
+                sleep 60
+                kill -0 "$$" || exit
+            done 2>/dev/null &
+        fi
+    fi
+
+    # Install/Uninstall/Check packages #########################################
+    ############################################################################
     for dir in "${dirs[@]}"; do
         [ -f "$DOTFILES_ROOT/$dir/bootstrap.sh" ] || continue
 
