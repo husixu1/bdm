@@ -46,6 +46,12 @@ _HELP_MESSAGE="\
     c*, check
         check whether a package is installed
 
+    l*, list
+        list all available packages
+
+    n*, new
+        create a new package with template
+
 [1mOPTIONS (install)[0m
     -n, --no-checkdeps
         Skip dependency checking and install dotfiles anyway. Might cause
@@ -70,6 +76,37 @@ _HELP_MESSAGE="\
     all
         all avaliable packages
 "
+
+# shellcheck disable=SC2016
+_BOOTSTRAP_TEMPLATE="\
+"'#!/bin/bash
+
+THISDIR=$(
+    cd "$(dirname "${BASH_SOURCE[0]}")" || exit
+    pwd -P
+)
+
+# shellcheck source=../.lib/utils.sh
+source "$THISDIR/../.lib/utils.sh"
+# shellcheck source=../.lib/symlink.sh
+source "$THISDIR/../.lib/symlink.sh"
+# shellcheck source=../.lib/transaction.sh
+source "$THISDIR/../.lib/transaction.sh"
+
+declare -a depends=()
+export depends
+
+declare -A packages=()
+export packages
+
+install() {
+    :
+}
+
+uninstall() {
+    :
+}
+'
 
 _OPTION_PATTERN='--?[[:alnum:]][[:alnum:]-]*$'
 
@@ -134,14 +171,15 @@ dispatchCommand() {
             shift
         done
         ;;
-
+    l*) cmd="list" ;;
+    n*) cmd="new" ;;
     *)
         error "Command '$cmd' not recognized. Run '${BASH_SOURCE[0]}' for help"
         exit 1
         ;;
     esac
 
-    # Grant and hold root access ###############################################
+    # Require and hold root access #############################################
     ############################################################################
 
     [[ $cmd == "install" ]] && $opt_i_installdeps && {
@@ -162,21 +200,39 @@ dispatchCommand() {
         done 2>/dev/null &
     }
 
+    # Install/List packages ####################################################
+    ############################################################################
+
+    [[ $cmd == "list" ]] && {
+        while read -r dir; do
+            if [[ -f $DOTFILES_ROOT/$dir/bootstrap.sh ]]; then
+                echo "$dir"
+            fi
+        done < <(ls "$DOTFILES_ROOT")
+        return 0
+    }
+
+    # Create a new package #####################################################
+    ############################################################################
+    [[ $cmd == "new" ]] && {
+        info "Creating package '$1'"
+        mkdir -p "$DOTFILES_ROOT/$1"
+        echo "$_BOOTSTRAP_TEMPLATE" > "$DOTFILES_ROOT/$1/bootstrap.sh"
+        return 0
+    }
+
     # Install/Uninstall/Check packages #########################################
     ############################################################################
 
     # Scan for all `bootstrap.sh` and run them
     local -a dirs=("$@")
 
-    [[ $1 == 'all' ]] && mapfile -t dirs < <(ls "${DOTFILES_ROOT}")
+    [[ $1 == 'all' ]] && mapfile -t dirs < <(ls "$DOTFILES_ROOT")
 
     for dir in "${dirs[@]}"; do
-        info "Processing $dir"
+        [ -f "$DOTFILES_ROOT/$dir/bootstrap.sh" ] || continue
 
-        [ -f "$DOTFILES_ROOT/$dir/bootstrap.sh" ] || {
-            warning "Cannot find $dir/bootstrap.sh. Processing aborted."
-            continue
-        }
+        info "Processing $dir"
 
         (# run in subshell. exit when any error happens
             set -eo pipefail
@@ -226,7 +282,7 @@ dispatchCommand() {
                             ${install_pkg_command}
                         fi
                     else
-                        warning "Cannot install package to meet dependency '${file}'"
+                        warning "Cannot meet dependency '${file}': it's not defined in the 'packages' dict"
                     fi
                 done
             }
