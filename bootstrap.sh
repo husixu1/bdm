@@ -116,6 +116,141 @@ uninstall() {
 
 _OPTION_PATTERN='--?[[:alnum:]][[:alnum:]-]*$'
 
+# $@: all dotfiles to install
+dependencyLoopDetection() {
+    local -a examQueue
+    for dotfile in "${dotfiles[@]}"; do
+        examQueue+=("$dotfile")
+        examQueueLevel+=("1")
+    done
+
+    # non-recursive DFS to find all dependency loops
+    local -A dependsSet
+    local -a dependsStack # dependsStack[-1] is stack top
+    while [[ ${#examQueue[@]} -ne 0 ]]; do
+        local curDotfile="${examQueue[0]}"
+        local curDotfileLevel="${examQueueLevel[0]}"
+        examQueue=("${examQueue[@]:1}")
+        examQueueLevel=("${examQueueLevel[@]:1}")
+
+        # DFS backtrace: set depends stack to correct level
+        while [[ ${#dependsStack[@]} -ne $((curDotfileLevel - 1)) ]]; do
+            unset dependsSet["${dependsStack[-1]}"]
+            dependsStack=("${dependsStack[@]::${#dependsStack[@]}-1}")
+        done
+
+        # check dependency loop
+        if [[ -n ${dependsSet[$curDotfile]} ]]; then
+            local loop
+            for depend in "${dependsStack[@]}"; do
+                if [[ "$depend" == "$curDotfile" ]]; then
+                    loop+="[1m[31m${depend}[0m -> "
+                else
+                    loop+="$depend -> "
+                fi
+            done
+            loop+="[1m[31m$curDotfile[0m"
+            error "Dependency loop detected: $loop"
+            unset loop
+            return 1
+        fi
+
+        # read all dependency of current dotfile
+        if [[ ! -f "$DOTFILES_ROOT/$curDotfile/bootstrap.sh" ]]; then
+            error "'${dependsStack[-1]}' depends on '$curDotfile' but '$DOTFILES_ROOT/$curDotfile/bootstrap.sh' does not exist."
+            return 1
+        fi
+        readarray -d " " -t depends < <(
+            set -eo pipefail
+            source "$DOTFILES_ROOT/$curDotfile/bootstrap.sh"
+            for depend in "${depends[@]}"; do
+                if [[ $depend =~ d[[:alnum:]]*:[[:print:]]+ ]]; then
+                    printf "%q " "${depend#d*:}"
+                fi
+            done
+        )
+        if [[ ${#depends[@]} -eq 0 ]]; then
+            continue
+        else
+            examQueue=("${depends[@]}" "${examQueue[@]}")
+            for ((i = 0; i < ${#depends[@]}; ++i)); do
+                examQueueLevel=("$((curDotfileLevel + 1))" "${examQueueLevel[@]}")
+            done
+            dependsStack+=("$curDotfile")
+            dependsSet["$curDotfile"]=1
+        fi
+    done
+    unset examQueue
+    return 0
+}
+
+# $1: name of the dotfile directory
+installDotfile() {
+    local dotfile=$1
+    (# run in subshell. exit when any error happens
+        set -eo pipefail
+
+        # shellcheck source=./vim/bootstrap.sh
+        source "$DOTFILES_ROOT/$dotfile/bootstrap.sh"
+
+        # Check dependency files before installing
+        declare -a missing_files=()
+        [[ $cmd == "install" ]] && $opt_i_checkdeps && {
+            declare -a virtual_files=()
+            for item in "${depends[@]}"; do
+                if [[ $item =~ fi[[:alnum:]]*:[[:print:]]+ ]]; then
+                    # item is a file
+                    [[ -e "${item#fi*:}" ]] || missing_files+=("${item}")
+                elif [[ $item =~ v[[:alnum:]]*:[[:print:]]+ ]]; then
+                    # item is virtual
+                    virtual_files+=("${item}")
+                elif [[ $item =~ fu[[:alnum:]]*:[[:print:]]+ ]]; then
+                    # Use a function to judge if item exists
+                    ${item#fu*:} || missing_files+=("${item}")
+                else
+                    # item is a executable
+                    command -v "${item#e*:}" >/dev/null 2>&1 ||
+                        missing_files+=("${item}")
+                fi
+            done
+            [[ ${#missing_files[@]} -gt 0 ]] && ! $opt_i_installdeps && {
+                warning "Dependency missing: ${missing_files[*]}"
+                exit 1
+            }
+            missing_files+=("${virtual_files[@]}")
+        }
+
+        # Install dependencies
+        [[ $cmd == "install" ]] && $opt_i_installdeps && {
+            # Install packages
+            for file in "${missing_files[@]}"; do
+                declare pkg=${packages[$file]}
+                if [[ -n $pkg ]]; then
+                    if [[ $pkg =~ f[[:alnum:]]*:[[:print:]]+ ]]; then
+                        # package should be installed through function
+                        ${pkg#f*:}
+                    else
+                        # package should be installed through system package manager
+                        install_pkg_command="install_system_package_${DISTRO} ${pkg#s*:}"
+                        ${install_pkg_command}
+                    fi
+                else
+                    warning "Cannot meet dependency '${file}': it's not defined in the 'packages' dict"
+                fi
+            done
+        }
+
+        type "$cmd" >/dev/null 2>&1 && $cmd
+    )
+    # We can't use `(set -e;cmd1;cmd2;...;) || warning ...` or if-else here.
+    # see https://stackoverflow.com/questions/29532904/bash-subshell-errexit-semantics
+    # shellcheck disable=SC2181
+    [[ $? == 0 ]] || {
+        warning "Failed ${cmd}ing $dotfile"
+        return 1
+    }
+}
+
 dispatchCommand() {
     [[ $# -eq 0 ]] && {
         echo "$_HELP_MESSAGE"
@@ -224,7 +359,7 @@ dispatchCommand() {
 
     # Parse tags ###############################################################
     ############################################################################
-    #    require_root=false
+    require_root=false
     #    for dir in "${dirs[@]}"; do
     #        [ -f "$DOTFILES_ROOT/$dir/bootstrap.sh" ] || continue
     #        (
@@ -242,70 +377,10 @@ dispatchCommand() {
 
     # Parse dependency graph ###################################################
     ############################################################################
-    local -a examQueue
-    for dotfile in "${dotfiles[@]}"; do
-        examQueue+=("$dotfile")
-        examQueueLevel+=("1")
-    done
-
-    # non-recursive DFS to find all dependency loops
-    local -A dependsSet
-    local -a dependsStack # dependsStack[-1] is stack top
-    while [[ ${#examQueue[@]} -ne 0 ]]; do
-        local curDotfile="${examQueue[0]}"
-        local curDotfileLevel="${examQueueLevel[0]}"
-        examQueue=("${examQueue[@]:1}")
-        examQueueLevel=("${examQueueLevel[@]:1}")
-
-        # DFS backtrace: set depends stack to correct level
-        while [[ ${#dependsStack[@]} -ne $((curDotfileLevel - 1)) ]]; do
-            unset dependsSet["${dependsStack[-1]}"]
-            dependsStack=("${dependsStack[@]::${#dependsStack[@]}-1}")
-        done
-
-        # check dependency loop
-        if [[ -n ${dependsSet[$curDotfile]} ]]; then
-            local loop
-            for depend in "${dependsStack[@]}"; do
-                if [[ $depend == $curDotfile ]]; then
-                    loop+="[1m[31m${depend}[0m -> "
-                else
-                    loop+="$depend -> "
-                fi
-            done
-            loop+="[1m[31m$curDotfile[0m"
-            error "Dependency loop detected: $loop"
-            unset loop
-            exit 1
-        fi
-
-        # read all dependency of current dotfile
-        if [[ ! -f "$DOTFILES_ROOT/$curDotfile/bootstrap.sh" ]]; then
-            error "'${dependsStack[-1]}' depends on '$curDotfile' but '$DOTFILES_ROOT/$curDotfile/bootstrap.sh' does not exist."
-            return 1
-        fi
-        readarray -d " " -t depends < <(
-            set -eo pipefail
-            source "$DOTFILES_ROOT/$curDotfile/bootstrap.sh"
-            for depend in "${depends[@]}"; do
-                if [[ $depend =~ d[[:alnum:]]*:[[:print:]]+ ]]; then
-                    printf "%q " "${depend#d*:}"
-                fi
-            done
-        )
-        if [[ ${#depends[@]} -eq 0 ]]; then
-            continue
-        else
-            examQueue=("${depends[@]}" "${examQueue[@]}")
-            for ((i = 0; i < ${#depends[@]}; ++i)); do
-                examQueueLevel=("$((curDotfileLevel + 1))" "${examQueueLevel[@]}")
-            done
-            dependsStack+=("$curDotfile")
-            dependsSet["$curDotfile"]=1
-        fi
-    done
-    unset examQueue
-    exit 1
+    dependencyLoopDetection "$@" || {
+        error "Depencency checking failed"
+        return 1
+    }
 
     # Require and hold root access #############################################
     ############################################################################
@@ -333,69 +408,9 @@ dispatchCommand() {
     # Install/Uninstall/Check packages #########################################
     ############################################################################
     for dotfile in "${dotfiles[@]}"; do
-
+        # A failure of one dotfile installation will not affect others
         info "Processing $dotfile"
-
-        (# run in subshell. exit when any error happens
-            set -eo pipefail
-
-            # shellcheck source=./vim/bootstrap.sh
-            source "$DOTFILES_ROOT/$dotfile/bootstrap.sh"
-
-            # Check dependency files before installing
-            declare -a missing_files=()
-            [[ $cmd == "install" ]] && $opt_i_checkdeps && {
-                declare -a virtual_files=()
-                for item in "${depends[@]}"; do
-                    if [[ $item =~ fi[[:alnum:]]*:[[:print:]]+ ]]; then
-                        # item is a file
-                        [[ -e "${item#fi*:}" ]] || missing_files+=("${item}")
-                    elif [[ $item =~ v[[:alnum:]]*:[[:print:]]+ ]]; then
-                        # item is virtual
-                        virtual_files+=("${item}")
-                    elif [[ $item =~ fu[[:alnum:]]*:[[:print:]]+ ]]; then
-                        # Use a function to judge if item exists
-                        ${item#fu*:} || missing_files+=("${item}")
-                    else
-                        # item is a executable
-                        command -v "${item#e*:}" >/dev/null 2>&1 ||
-                            missing_files+=("${item}")
-                    fi
-                done
-                [[ ${#missing_files[@]} -gt 0 ]] && ! $opt_i_installdeps && {
-                    warning "Dependency missing: ${missing_files[*]}"
-                    exit 1
-                }
-                missing_files+=("${virtual_files[@]}")
-            }
-
-            # Install dependencies
-            [[ $cmd == "install" ]] && $opt_i_installdeps && {
-                # Install packages
-                for file in "${missing_files[@]}"; do
-                    declare pkg=${packages[$file]}
-                    if [[ -n $pkg ]]; then
-                        if [[ $pkg =~ f[[:alnum:]]*:[[:print:]]+ ]]; then
-                            # package should be installed through function
-                            ${pkg#f*:}
-                        else
-                            # package should be installed through system package manager
-                            install_pkg_command="install_system_package_${DISTRO} ${pkg#s*:}"
-                            ${install_pkg_command}
-                        fi
-                    else
-                        warning "Cannot meet dependency '${file}': it's not defined in the 'packages' dict"
-                    fi
-                done
-            }
-
-            type "$cmd" >/dev/null 2>&1 && $cmd
-        )
-
-        # We can't use `(set -e;cmd1;cmd2;...;) || warning ...` or if-else here.
-        # see https://stackoverflow.com/questions/29532904/bash-subshell-errexit-semantics
-        # shellcheck disable=SC2181
-        [[ $? == 0 ]] || warning "Failed ${cmd}ing $dotfile"
+        installDotfile "$dotfile"
     done
 }
 
