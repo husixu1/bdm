@@ -160,12 +160,14 @@ main() {
     # Parse dependency graph ###################################################
     ############################################################################
     # Check for dependency loop
-    dependencyLoopDetection "${dotfiles[@]}" || {
-        error "Depencency checking failed"
-        return 1
+    $opt_i_checkdeps && {
+        dependencyLoopDetection "${dotfiles[@]}" || {
+            error "Depencency checking failed"
+            return 1
+        }
+        # add all dependnecy to 'dotfiles' and correct their order
+        mapfile -t dotfiles < <(listAndSortDependencies "${dotfiles[@]}")
     }
-    # add all dependnecy to 'dotfiles' and correct their order
-    mapfile -t dotfiles < <(listAndSortDependencies "${dotfiles[@]}")
 
     # Require and hold root access #############################################
     ############################################################################
@@ -379,6 +381,7 @@ installDotfile() {
         warning "Failed ${cmd}ing $dotfile"
         return 1
     }
+    # TODO: break this function into 3 functions
 }
 
 _HELP_MESSAGE="\
