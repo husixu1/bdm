@@ -1,8 +1,6 @@
 #!/bin/bash
 # shellcheck disable=SC1090
 
-shopt -o expand_aliases
-
 DOTFILES_ROOT=$(
     cd "$(dirname "${BASH_SOURCE[0]}")" || exit
     pwd
@@ -189,9 +187,9 @@ dispatchCommand() {
     # List packages ############################################################
     ############################################################################
     [[ $cmd == "list" ]] && {
-        while read -r dir; do
-            if [[ -f $DOTFILES_ROOT/$dir/bootstrap.sh ]]; then
-                echo "$dir"
+        while read -r dotfile; do
+            if [[ -f $DOTFILES_ROOT/$dotfile/bootstrap.sh ]]; then
+                echo "$dotfile"
             fi
         done < <(ls "$DOTFILES_ROOT")
         return 0
@@ -209,35 +207,109 @@ dispatchCommand() {
     # List/filter packages for install/uninstall/check #########################
     ############################################################################
     # Scan for all `bootstrap.sh` and run them
-    local -a dirs=("$@")
+    local -a dotfiles=("$@")
+    [[ $1 == 'all' ]] && mapfile -t dotfiles < <(ls "$DOTFILES_ROOT")
 
-    [[ $1 == 'all' ]] && mapfile -t dirs < <(ls "$DOTFILES_ROOT")
+    # filter out invalid dotfiles
+    local -a validDotfiles
+    for dotfile in "${dotfiles[@]}"; do
+        if [ -f "$DOTFILES_ROOT/$dotfile/bootstrap.sh" ]; then
+            validDotfiles+=("$dotfile")
+        fi
+    done
+
+    # update dotfiles list
+    dotfiles=("${validDotfiles[@]}")
+    unset validDotfiles
 
     # Parse tags ###############################################################
     ############################################################################
-#    require_root=false
-#    for dir in "${dirs[@]}"; do
-#        [ -f "$DOTFILES_ROOT/$dir/bootstrap.sh" ] || continue
-#        (
-#            set -eo pipefail
-#            # shellcheck source=./vim/bootstrap.sh
-#            source "$DOTFILES_ROOT/$dir/bootstrap.sh"
-#
-#            for tag in "${tags[@]}"; do
-#                if [[ $tag == "root" ]]; then
-#                    require_root=true
-#                fi
-#            done
-#        )
-#    done
+    #    require_root=false
+    #    for dir in "${dirs[@]}"; do
+    #        [ -f "$DOTFILES_ROOT/$dir/bootstrap.sh" ] || continue
+    #        (
+    #            set -eo pipefail
+    #            # shellcheck source=./vim/bootstrap.sh
+    #            source "$DOTFILES_ROOT/$dir/bootstrap.sh"
+    #
+    #            for tag in "${tags[@]}"; do
+    #                if [[ $tag == "root" ]]; then
+    #                    require_root=true
+    #                fi
+    #            done
+    #        )
+    #    done
 
     # Parse dependency graph ###################################################
     ############################################################################
-# TODO
+    local -a examQueue
+    for dotfile in "${dotfiles[@]}"; do
+        examQueue+=("$dotfile")
+        examQueueLevel+=("1")
+    done
+
+    # non-recursive DFS to find all dependency loops
+    local -A dependsSet
+    local -a dependsStack # dependsStack[-1] is stack top
+    while [[ ${#examQueue[@]} -ne 0 ]]; do
+        local curDotfile="${examQueue[0]}"
+        local curDotfileLevel="${examQueueLevel[0]}"
+        examQueue=("${examQueue[@]:1}")
+        examQueueLevel=("${examQueueLevel[@]:1}")
+
+        # DFS backtrace: set depends stack to correct level
+        while [[ ${#dependsStack[@]} -ne $((curDotfileLevel - 1)) ]]; do
+            unset dependsSet["${dependsStack[-1]}"]
+            dependsStack=("${dependsStack[@]::${#dependsStack[@]}-1}")
+        done
+
+        # check dependency loop
+        if [[ -n ${dependsSet[$curDotfile]} ]]; then
+            local loop
+            for depend in "${dependsStack[@]}"; do
+                if [[ $depend == $curDotfile ]]; then
+                    loop+="[1m[31m${depend}[0m -> "
+                else
+                    loop+="$depend -> "
+                fi
+            done
+            loop+="[1m[31m$curDotfile[0m"
+            error "Dependency loop detected: $loop"
+            unset loop
+            exit 1
+        fi
+
+        # read all dependency of current dotfile
+        if [[ ! -f "$DOTFILES_ROOT/$curDotfile/bootstrap.sh" ]]; then
+            error "'${dependsStack[-1]}' depends on '$curDotfile' but '$DOTFILES_ROOT/$curDotfile/bootstrap.sh' does not exist."
+            return 1
+        fi
+        readarray -d " " -t depends < <(
+            set -eo pipefail
+            source "$DOTFILES_ROOT/$curDotfile/bootstrap.sh"
+            for depend in "${depends[@]}"; do
+                if [[ $depend =~ d[[:alnum:]]*:[[:print:]]+ ]]; then
+                    printf "%q " "${depend#d*:}"
+                fi
+            done
+        )
+        if [[ ${#depends[@]} -eq 0 ]]; then
+            continue
+        else
+            examQueue=("${depends[@]}" "${examQueue[@]}")
+            for ((i = 0; i < ${#depends[@]}; ++i)); do
+                examQueueLevel=("$((curDotfileLevel + 1))" "${examQueueLevel[@]}")
+            done
+            dependsStack+=("$curDotfile")
+            dependsSet["$curDotfile"]=1
+        fi
+    done
+    unset examQueue
+    exit 1
 
     # Require and hold root access #############################################
     ############################################################################
-#    require_root_failed=false
+    #    require_root_failed=false
     if [[ $cmd == "install" ]]; then
         if $opt_i_installdeps || $require_root; then
             # At least `sudo` is needed
@@ -260,16 +332,15 @@ dispatchCommand() {
 
     # Install/Uninstall/Check packages #########################################
     ############################################################################
-    for dir in "${dirs[@]}"; do
-        [ -f "$DOTFILES_ROOT/$dir/bootstrap.sh" ] || continue
+    for dotfile in "${dotfiles[@]}"; do
 
-        info "Processing $dir"
+        info "Processing $dotfile"
 
         (# run in subshell. exit when any error happens
             set -eo pipefail
 
             # shellcheck source=./vim/bootstrap.sh
-            source "$DOTFILES_ROOT/$dir/bootstrap.sh"
+            source "$DOTFILES_ROOT/$dotfile/bootstrap.sh"
 
             # Check dependency files before installing
             declare -a missing_files=()
@@ -324,7 +395,7 @@ dispatchCommand() {
         # We can't use `(set -e;cmd1;cmd2;...;) || warning ...` or if-else here.
         # see https://stackoverflow.com/questions/29532904/bash-subshell-errexit-semantics
         # shellcheck disable=SC2181
-        [[ $? == 0 ]] || warning "Failed ${cmd}ing $dir"
+        [[ $? == 0 ]] || warning "Failed ${cmd}ing $dotfile"
     done
 }
 

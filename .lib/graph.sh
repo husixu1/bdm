@@ -4,7 +4,7 @@
 
 declare __GRAPH_COUNTER
 # $1 Graph name
-Graph() {
+Graph:new() {
     if [[ -n ${!1} ]]; then
         error "Variable '$1' already exists"
         return 1
@@ -16,23 +16,13 @@ Graph() {
     declare -gA "__GRAPH_NODES_${!1}"
     declare -ga "__GRAPH_ITEMS_${!1}"
     declare -ga "__GRAPH_EDGES_${!1}"
-
-    alias "~$1=Graph:delGraph $1"
-    alias "$1.addNode=Graph:addNode $1"
-    alias "$1.hasNode=Graph:hasNode $1"
-    alias "$1.addEdge=Graph:addEdge $1"
 }
 
 # $1: Graph name
-Graph:delGraph() {
+Graph:del() {
     unset "__GRAPH_NODES_${!1}"
     unset "__GRAPH_ITEMS_${!1}"
     unset "__GRAPH_EDGES_${!1}"
-
-    unalias "~$1"
-    unalias "$1.addNode"
-    unalias "$1.hasNode"
-    unalias "$1.addEdge"
 }
 
 # $1: Graph name
