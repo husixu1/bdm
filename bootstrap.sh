@@ -1,4 +1,7 @@
 #!/bin/bash
+# shellcheck disable=SC1090
+
+shopt -o expand_aliases
 
 DOTFILES_ROOT=$(
     cd "$(dirname "${BASH_SOURCE[0]}")" || exit
@@ -6,8 +9,8 @@ DOTFILES_ROOT=$(
 )
 export DOTFILES_ROOT
 
-# shellcheck source=./.lib/utils.sh
 source "${DOTFILES_ROOT}/.lib/utils.sh"
+source "${DOTFILES_ROOT}/.lib/distro.sh"
 
 # This script requires bash >= 4.3, since it uses `declare -n`
 if [[ ${BASH_VERSINFO[0]} -lt 4 ]] ||
