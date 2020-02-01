@@ -18,7 +18,8 @@ if [[ ${BASH_VERSINFO[0]} -lt 4 ]] ||
 fi
 
 [[ $EUID -eq 0 ]] && {
-    error "This script cannot be run as root, as it might cause unexpected damage." >&2
+    error "This script cannot be run as root," \
+        "as it might cause unexpected damage." >&2
     exit 1
 }
 
@@ -160,12 +161,18 @@ main() {
     # Parse dependency graph ###################################################
     ############################################################################
     # Check for dependency loop
-    dependencyLoopDetection "${dotfiles[@]}" || {
-        error "Depencency checking failed"
-        return 1
+    $opt_i_checkdeps && {
+        dependencyLoopDetection "${dotfiles[@]}" || {
+            error "Depencency checking failed"
+            return 1
+        }
+
+        # add all dependency to 'dotfiles' and correct their order,
+        # if automatic dependency install is enabled
+        $opt_i_installdeps && {
+            mapfile -t dotfiles < <(listAndSortDependencies "${dotfiles[@]}")
+        }
     }
-    # add all dependnecy to 'dotfiles' and correct their order
-    mapfile -t dotfiles < <(listAndSortDependencies "${dotfiles[@]}")
 
     # Require and hold root access #############################################
     ############################################################################
@@ -180,7 +187,8 @@ main() {
             # Require root privilege
             sudo -v || {
                 if $require_root; then
-                    warning "Require root failed. The following packages will NOT be installed:"
+                    warning "Require root failed." \
+                        "The following packages will NOT be installed:"
                     # TODO:
                 elif $opt_i_installdeps; then
                     error "Automatically installing dependencies requires root."
@@ -190,19 +198,20 @@ main() {
 
             # keep sudo credential cache up-to-date
             while true; do
+                sleep 300
                 sudo -n true
-                sleep 60
-                kill -0 "$$" || exit
-            done 2>/dev/null &
+                kill -0 "$$" 2>/dev/null || exit
+            done &
         fi
     fi
 
     # Install/Uninstall/Check packages #########################################
     ############################################################################
     for dotfile in "${dotfiles[@]}"; do
-        # A failure of one dotfile installation will not affect others
+        # A failure of one dotfile installation will stop successive install,
+        # as there might be a dependency chain in the dotfiles list
         info "Processing $dotfile"
-        installDotfile "$dotfile"
+        installDotfile "$dotfile" || return 1
     done
 }
 
@@ -249,7 +258,8 @@ dependencyLoopDetection() {
         if [[ ! -f "$DOTFILES_ROOT/$curDotfile/bootstrap.sh" ]]; then
             chain=$(printf "%s -> " "${dependsStack[@]}")
             chain+="$curDotfile"
-            error "Dependency chain: $chain, but '$DOTFILES_ROOT/$curDotfile/bootstrap.sh' does not exist."
+            error "Dependency chain: $chain," \
+                "but '$DOTFILES_ROOT/$curDotfile/bootstrap.sh' does not exist."
             return 1
         fi
         mapfile -t depends < <(
@@ -317,51 +327,65 @@ installDotfile() {
         # shellcheck source=./vim/bootstrap.sh
         source "$DOTFILES_ROOT/$dotfile/bootstrap.sh" >/dev/null 2>&1
 
+        declare -a missing_files_install=()
+        declare -a missing_files_check=()
         # Check dependency files before installing
-        declare -a missing_files=()
         [[ $cmd == "install" ]] && $opt_i_checkdeps && {
-            declare -a virtual_files=()
             for item in "${depends[@]}"; do
                 if [[ $item =~ fi[[:alnum:]]*:[[:print:]]+ ]]; then
                     # item is a file
-                    [[ -e "${item#fi*:}" ]] || missing_files+=("${item}")
+                    [[ -e "${item#fi*:}" ]] || {
+                        missing_files_check+=("${item}")
+                        missing_files_install+=("${item}")
+                    }
                 elif [[ $item =~ v[[:alnum:]]*:[[:print:]]+ ]]; then
                     # item is virtual
-                    virtual_files+=("${item}")
+                    missing_files_install+=("${item}")
                 elif [[ $item =~ fu[[:alnum:]]*:[[:print:]]+ ]]; then
                     # Use a function to judge if item exists
-                    ${item#fu*:} || missing_files+=("${item}")
+                    ${item#fu*:} || {
+                        missing_files_check+=("${item}")
+                        missing_files_install+=("${item}")
+                    }
                 elif [[ $item =~ d[[:alnum:]]*:[[:print:]]+ ]]; then
-                    : # Skip. internal dependency is already parsed.
+                    # Check for invalid key in 'packages' array
+                    [[ -z ${packages[$item]} ]] ||
+                        warning "$dotfile: [$item]=${packages[$item]} in the" \
+                            "'packages' array is ignored. Please consider" \
+                            "removing it."
+                    # Skip. internal dependency is already parsed.
                 else
                     # item is a executable
-                    command -v "${item#e*:}" >/dev/null 2>&1 ||
-                        missing_files+=("${item}")
+                    command -v "${item#e*:}" >/dev/null 2>&1 || {
+                        missing_files_check+=("${item}")
+                        missing_files_install+=("${item}")
+                    }
                 fi
             done
-            [[ ${#missing_files[@]} -gt 0 ]] && ! $opt_i_installdeps && {
-                warning "Dependency missing: ${missing_files[*]}"
+            [[ ${#missing_files_check[@]} -gt 0 ]] && ! $opt_i_installdeps && {
+                warning "Dependency missing: ${missing_files_check[*]}"
                 exit 1
             }
-            missing_files+=("${virtual_files[@]}")
+            unset missing_files_check
         }
 
         # Install dependencies
         [[ $cmd == "install" ]] && $opt_i_installdeps && {
             # Install packages
-            for file in "${missing_files[@]}"; do
+            for file in "${missing_files_install[@]}"; do
                 declare pkg=${packages[$file]}
                 if [[ -n $pkg ]]; then
                     if [[ $pkg =~ f[[:alnum:]]*:[[:print:]]+ ]]; then
                         # package should be installed through function
                         ${pkg#f*:}
                     else
-                        # package should be installed through system package manager
+                        # installed package through system package manager
                         install_pkg_command="install_system_package_${DISTRO} ${pkg#s*:}"
-                        ${install_pkg_command}
+                        $install_pkg_command || return 1
                     fi
                 else
-                    warning "Cannot meet dependency '${file}': it's not defined in the 'packages' dict"
+                    warning "Cannot meet dependency '${file}':" \
+                        "it's not defined in the 'packages' dict"
                 fi
             done
         }
@@ -379,6 +403,7 @@ installDotfile() {
         warning "Failed ${cmd}ing $dotfile"
         return 1
     }
+    # TODO: break this function into 3 functions
 }
 
 _HELP_MESSAGE="\
@@ -436,18 +461,17 @@ _HELP_MESSAGE="\
 # shellcheck disable=SC2016
 _BOOTSTRAP_TEMPLATE="\
 "'#!/bin/bash
+# shellcheck disable=SC1090
+
+source "$DOTFILES_ROOT/.lib/utils.sh"
+source "$DOTFILES_ROOT/.lib/distro.sh"
+source "$DOTFILES_ROOT/.lib/symlink.sh"
+source "$DOTFILES_ROOT/.lib/transaction.sh"
 
 THISDIR=$(
     cd "$(dirname "${BASH_SOURCE[0]}")" || exit
     pwd -P
 )
-
-# shellcheck source=../.lib/utils.sh
-source "$THISDIR/../.lib/utils.sh"
-# shellcheck source=../.lib/symlink.sh
-source "$THISDIR/../.lib/symlink.sh"
-# shellcheck source=../.lib/transaction.sh
-source "$THISDIR/../.lib/transaction.sh"
 
 declare -a depends=()
 export depends
