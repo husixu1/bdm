@@ -18,7 +18,8 @@ if [[ ${BASH_VERSINFO[0]} -lt 4 ]] ||
 fi
 
 [[ $EUID -eq 0 ]] && {
-    error "This script cannot be run as root, as it might cause unexpected damage." >&2
+    error "This script cannot be run as root," \
+        "as it might cause unexpected damage." >&2
     exit 1
 }
 
@@ -165,8 +166,12 @@ main() {
             error "Depencency checking failed"
             return 1
         }
-        # add all dependnecy to 'dotfiles' and correct their order
-        mapfile -t dotfiles < <(listAndSortDependencies "${dotfiles[@]}")
+
+        # add all dependency to 'dotfiles' and correct their order,
+        # if automatic dependency install is enabled
+        $opt_i_installdeps && {
+            mapfile -t dotfiles < <(listAndSortDependencies "${dotfiles[@]}")
+        }
     }
 
     # Require and hold root access #############################################
@@ -182,7 +187,8 @@ main() {
             # Require root privilege
             sudo -v || {
                 if $require_root; then
-                    warning "Require root failed. The following packages will NOT be installed:"
+                    warning "Require root failed." \
+                        "The following packages will NOT be installed:"
                     # TODO:
                 elif $opt_i_installdeps; then
                     error "Automatically installing dependencies requires root."
@@ -251,7 +257,8 @@ dependencyLoopDetection() {
         if [[ ! -f "$DOTFILES_ROOT/$curDotfile/bootstrap.sh" ]]; then
             chain=$(printf "%s -> " "${dependsStack[@]}")
             chain+="$curDotfile"
-            error "Dependency chain: $chain, but '$DOTFILES_ROOT/$curDotfile/bootstrap.sh' does not exist."
+            error "Dependency chain: $chain," \
+                "but '$DOTFILES_ROOT/$curDotfile/bootstrap.sh' does not exist."
             return 1
         fi
         mapfile -t depends < <(
@@ -334,7 +341,12 @@ installDotfile() {
                     # Use a function to judge if item exists
                     ${item#fu*:} || missing_files+=("${item}")
                 elif [[ $item =~ d[[:alnum:]]*:[[:print:]]+ ]]; then
-                    : # Skip. internal dependency is already parsed.
+                    # Check for invalid key in 'packages' array
+                    [[ -z ${packages[$item]} ]] ||
+                        warning "$dotfile: [$item]=${packages[$item]} in the" \
+                            "'packages' array is ignored. Please consider" \
+                            "removing it."
+                    # Skip. internal dependency is already parsed.
                 else
                     # item is a executable
                     command -v "${item#e*:}" >/dev/null 2>&1 ||
@@ -358,12 +370,13 @@ installDotfile() {
                         # package should be installed through function
                         ${pkg#f*:}
                     else
-                        # package should be installed through system package manager
+                        # installed package through system package manager
                         install_pkg_command="install_system_package_${DISTRO} ${pkg#s*:}"
-                        ${install_pkg_command}
+                        $install_pkg_command
                     fi
                 else
-                    warning "Cannot meet dependency '${file}': it's not defined in the 'packages' dict"
+                    warning "Cannot meet dependency '${file}':" \
+                        "it's not defined in the 'packages' dict"
                 fi
             done
         }
