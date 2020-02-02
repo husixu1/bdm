@@ -75,5 +75,12 @@ transactionInstallSymlink() {
 # This function must be run in a transaction
 # insall symlink, otherwise rollback
 transactionRemoveSymlink() {
+    # target does not exists
+    [[ -e "$2" ]] || return 0
+    # target is not a symlink or source and target is not the same file
+    [[ -L "$2" && $1 -ef $2 ]] || {
+        error "Link $2 is not managed by this repo"
+        return 1
+    }
     action removeSymLink "$1" "$2" "$3" --- installSymLink "$1" "$2" "$3"
 }
