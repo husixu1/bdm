@@ -7,6 +7,7 @@ source "$(dirname "${BASH_SOURCE[0]}")"/utils.sh
 
 # $1: source file/directory
 # $2: target file/directory (a symlink)
+# $3 (optional): `asroot' means install symlink as root
 # return: 0 if installed successfully. 1 otherwise
 #
 # If `target` already exists and it's not a link to `source`,
@@ -25,12 +26,17 @@ installSymLink() {
     # Otherwise if target file exists, return 1
     [[ -e "$2" ]] && return 1
 
-    # Otherwise try link the source to target
-    ln -s "$1" "$2"
+    if [[ $3 == asroot ]]; then
+        sudo ln -s "$1" "$2"
+    else
+        # Otherwise try link the source to target
+        ln -s "$1" "$2"
+    fi
 }
 
 # $1: source file/directory
 # $2: target file/directory (a symlink)
+# $3 (optional): `asroot' means remove symlink as root
 # return: 0 if `target` is removed successfully, 1 otherwise
 #
 # If `target` is not a symlink to `source` or cannot be removed, 1 is returned
@@ -44,24 +50,30 @@ removeSymLink() {
         return 1
     }
 
-    # try unlink target
-    unlink "$2"
+    if [[ $3 == asroot ]]; then
+        sudo unlink "$2"
+    else
+        # try unlink target
+        unlink "$2"
+    fi
 }
 
 # $1: source file/directory
 # $2: target file/directory (a symlink)
+# $3 (optional): `asroot' means remove symlink as root
 #
 # This function must be run in a transaction
 # insall symlink, otherwise rollback
 transactionInstallSymlink() {
-    action installSymLink "$1" "$2" --- removeSymLink "$1" "$2"
+    action installSymLink "$1" "$2" "$3" --- removeSymLink "$1" "$2" "$3"
 }
 
 # $1: source file/directory
 # $2: target file/directory (a symlink)
+# $3 (optional): `asroot' means remove symlink as root
 #
 # This function must be run in a transaction
 # insall symlink, otherwise rollback
 transactionRemoveSymlink() {
-    action removeSymLink "$1" "$2" --- installSymLink "$1" "$2"
+    action removeSymLink "$1" "$2" "$3" --- installSymLink "$1" "$2" "$3"
 }
