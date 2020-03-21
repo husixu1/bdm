@@ -32,7 +32,7 @@ fi
     export -f sudo
 }
 
-_OPTION_PATTERN='--?[[:alnum:]][[:alnum:]-]*$'
+_OPTION_PATTERN='^--?[[:alnum:]][[:alnum:]-]*$'
 
 main() {
     [[ $# -eq 0 ]] && {
