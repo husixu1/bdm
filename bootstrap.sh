@@ -480,11 +480,15 @@ declare -A packages=()
 export packages
 
 install() {
-    :
+    transaction
+    # transactionInstallSymlink "$THISDIR/a" "$LOCAL_CONFIG_DIR/b"
+    commit
 }
 
 uninstall() {
-    :
+    transaction
+    # transactionRemoveSymlink "$THISDIR/a" "$LOCAL_CONFIG_DIR/b"
+    commit
 }
 '
 
