@@ -99,7 +99,7 @@ main() {
         done
 
         # require root if not in usermode
-        ${install_options[usermode]} || require_and_hold_root_access
+        ${install_options[usermode]} || require_and_hold_root_access || return 1
 
         # dotfiles to install
         local -a dotfiles
@@ -498,10 +498,6 @@ install_dotfiles() {
                         }
                     else
                         # package should be installed through package manager.
-                        if ! $ISROOT; then
-                            error "Cannot install system package ${pkg#s*:} in user mode"
-                            return 1
-                        fi
                         install_pkg_command="install_system_package_${DISTRO} ${pkg#s*:}"
                         $install_pkg_command || {
                             error "$dotfile: Failed installing system package ${pkg#s*:}, command return code: $?."
@@ -621,7 +617,6 @@ declare -a tags=(t:r:arch t:u:arch)
 export tags
 
 if $ISROOT; then
-    # root installation
     if [[ $DISTRO == arch ]]; then
         # packages+=()
         : # add more distros use #elif
