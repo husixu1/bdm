@@ -1,5 +1,6 @@
 #!/bin/env bash
 # shellcheck disable=SC1090
+# shellcheck disable=SC2181
 
 # SOME CONFIG THAT CAN BE CHANGED ##############################################
 ################################################################################
@@ -7,7 +8,7 @@
 ADDITIONAL_DIRS=(Software)
 
 # compilation job count when building things in user mode
-JOB_COUNT=$(command -v nproc && nproc --all)
+JOB_COUNT=$(command -v nproc >/dev/null 2>&1 && nproc --all)
 JOB_COUNT=${JOB_COUNT:-8}
 JOB_COUNT=$((JOB_COUNT / 2))
 [[ $JOB_COUNT -le 0 ]] && JOB_COUNT=1
@@ -30,11 +31,14 @@ fi
 
 # EXPORTS ######################################################################
 ################################################################################
-export DOTFILES_ROOT=$(
+DOTFILES_ROOT=$(
     cd "$(dirname "${BASH_SOURCE[0]}")" || exit
     pwd
 )
-export USER_PREFIX="$HOME/.local"
+export DOTFILES_ROOT
+
+USER_PREFIX="$HOME/.local"
+export USER_PREFIX
 
 # INIT & INCLUDES ##############################################################
 ################################################################################
@@ -450,10 +454,16 @@ install_dotfiles() {
                         missing_deps_install+=("${item}")
                     elif [[ $dep_type == 'function' ]]; then
                         # Use a function to judge if item exists
-                        ${item#fu*:} || {
+                        set +e
+                        (
+                            set -e
+                            ${item#fu*:}
+                        )
+                        [[ $? == 0 ]] || {
                             missing_deps_check+=("${item}")
                             missing_deps_install+=("${item}")
                         }
+                        set -e
                     elif [[ $dep_type == 'executable' ]]; then
                         command -v "$dep_name" >/dev/null 2>&1 || {
                             missing_deps_check+=("${item}")
@@ -500,7 +510,6 @@ install_dotfiles() {
             )
             # We can't use `(set -e;cmd1;cmd2;...;) || warning ...` or if-else here.
             # see https://stackoverflow.com/questions/29532904/bash-subshell-errexit-semantics
-            # shellcheck disable=SC2181
             [[ $? == 0 ]] || {
                 error "Unable to meet dependency(s), aborting... "
                 return 1
@@ -525,22 +534,37 @@ install_dotfiles() {
                     declare dep="${missing_deps["$i"]}"
                     declare pkg="${packages["$dep"]}"
                     if [[ $pkg =~ f[[:alnum:]]*:[[:print:]]+ ]]; then
-                        # package should be installed through function
-                        ${pkg#f*:} || {
-                            error "$dotfile: Failed executing function ${pkg#f*:}, function return code: $?."
+
+                        # package should be installed through function, in a subshell,
+                        # so that set -e works correctly (both "exceptions" and returned error code are captured)
+                        # We have to use this crooked way to simulate try-catch ...
+                        # As above, see https://stackoverflow.com/questions/29532904/bash-subshell-errexit-semantics
+                        set +e
+                        (
+                            set -e
+                            ${pkg#f*:}
+                        )
+                        [[ $? == 0 ]] || {
+                            error "$dotfile: Failed executing function ${pkg#f*:}."
                             return 1
                         }
+                        set -e
                     else
                         # package should be installed through package manager.
                         install_pkg_command="install_system_package_${DISTRO} ${pkg#s*:}"
-                        $install_pkg_command || {
-                            error "$dotfile: Failed installing system package ${pkg#s*:}, command return code: $?."
+                        set +e
+                        (
+                            set -e
+                            $install_pkg_command
+                        )
+                        [[ $? == 0 ]] || {
+                            error "$dotfile: Failed installing system package ${pkg#s*:}."
                             return 1
                         }
+                        set -e
                     fi
                 done
             )
-            # shellcheck disable=SC2181
             [[ $? == 0 ]] || {
                 error "Dependency installation failed, aborting... "
                 return 1
@@ -561,8 +585,6 @@ install_dotfiles() {
                 warning "'install()' not defined in '$dotfile/bootstrap.sh', skipping."
             fi
         )
-
-        # shellcheck disable=SC2181
         [[ $? == 0 ]] || {
             warning "Failed installing $dotfile"
             return 1
