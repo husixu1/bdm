@@ -7,7 +7,10 @@
 ADDITIONAL_DIRS=(Software)
 
 # compilation job count when building things in user mode
-JOB_COUNT=4
+JOB_COUNT=$(command -v nproc && nproc --all)
+JOB_COUNT=${JOB_COUNT:-8}
+JOB_COUNT=$((JOB_COUNT / 2))
+[[ $JOB_COUNT -le 0 ]] && JOB_COUNT=1
 export JOB_COUNT
 
 # STARTUP CHECKING #############################################################
@@ -98,9 +101,18 @@ main() {
                 install_options[usermode]=true
                 export ISROOT=false
                 ;;
+            "-j" | "--jobs")
+                shift
+                export JOB_COUNT=$1
+                local re='^[1-9][0-9]*$'
+                [[ $JOB_COUNT =~ $re ]] || {
+                    error "job count must be a positive integer"
+                    return 1
+                }
+                ;;
             *)
                 error "Option $1 unrecognized"
-                return
+                return 1
                 ;;
             esac
             shift
@@ -599,6 +611,9 @@ _HELP_MESSAGE="\
 
     -p <PFX>, --prefix <PFX> (implies -u)
         Prefix for installing packages in user mode. Defaults to $HOME/.local
+
+    -j <JOB_COUNT>, --jobs <JOB_COUNT>
+        Number of parallel jobs for the automake system. Only applies when -u is specified. Defaults to number of cores or 4 (if number of cores cannot be detected).
 
 [1mOPTIONS (uninstall)[0m
     Note that this bootstrap script does not provide functionality to uninstall previously installed dependencies. Please use your distro's package manager or manually uninstall the dependencies. You can check each dotfiles' bootstrap.sh to see what is installed exactly.
