@@ -1,6 +1,15 @@
 #!/bin/env bash
 # shellcheck disable=SC1090
 
+# SOME CONFIG THAT CAN BE CHANGED ##############################################
+################################################################################
+# additional directory to search for dotfiles configs (relative to DOTFILES_ROOT)
+ADDITIONAL_DIRS=(Software)
+
+# compilation job count when building things in user mode
+JOB_COUNT=4
+export JOB_COUNT
+
 # STARTUP CHECKING #############################################################
 ################################################################################
 # This script requires bash >= 4.3, since it uses `declare -n`
@@ -23,7 +32,6 @@ export DOTFILES_ROOT=$(
     pwd
 )
 export USER_PREFIX="$HOME/.local"
-export JOB_COUNT=4
 
 # INIT & INCLUDES ##############################################################
 ################################################################################
@@ -104,6 +112,16 @@ main() {
         # dotfiles to install
         local -a dotfiles
 
+        # filter a list of valid dotfiles
+        local valid_dotfiles
+        valid_dotfiles="$(filter_valid_dotfiles "$@")"
+        if [[ -n $valid_dotfiles ]]; then
+            mapfile -t dotfiles <<<"$valid_dotfiles"
+        else
+            warning "No dotfile to install..."
+            return 0
+        fi
+
         # TODO: before parsing dependency graph:
         # check non-prefixed depends. First mark them as executable (e*:). If they are satisfied and not in the `packages` dir, Search them in the `Software` dir and mark them as dotfiles (d*:). doing so alows adding extra software build scripts without doing changes on the original bootstrap script
 
@@ -121,17 +139,6 @@ main() {
                 mapfile -t dotfiles < <(list_and_sort_dependencies "${dotfiles[@]}")
             }
         }
-
-        # filter a list of valid dotfiles
-        local valid_dotfiles
-        valid_dotfiles="$(filter_valid_dotfiles "$@")"
-        if [[ -n $valid_dotfiles ]]; then
-            mapfile -t dotfiles <<< "$valid_dotfiles"
-        else
-            warning "Not dotfiles to install..."
-            return 0
-        fi
-
         echo "dotfiles to install: ${dotfiles[*]}"
         echo -n "Proceed? [Y/n]: "
         read -r ans
@@ -192,18 +199,7 @@ main() {
         ;;
     esac
 
-    # Parse tags ###############################################################
-    ############################################################################
-
-    # TODO: move these to install section
-    # Install/Uninstall/Check packages #########################################
-    ############################################################################
-    for dotfile in "${dotfiles[@]}"; do
-        # A failure of one dotfile installation will stop successive install,
-        # as there might be a dependency chain in the dotfiles list
-        info "Processing $dotfile"
-        processDotfile "$dotfile" || return 1
-    done
+    # TODO: add tag support
 }
 
 # $@: list of dotfiles. 'all' for every valid dotfiles
@@ -259,6 +255,7 @@ require_and_hold_root_access() {
 # print: two string: <type> <name>, separated with space, can be read
 # into variable with `read -r type name`
 dependency_type_and_name() {
+    local item="$1"
     if [[ $item =~ fi[[:alnum:]]*:[[:print:]]+ ]]; then
         echo "file ${item#fi*:}"
     elif [[ $item =~ v[[:alnum:]]*:[[:print:]]+ ]]; then
@@ -266,62 +263,87 @@ dependency_type_and_name() {
     elif [[ $item =~ fu[[:alnum:]]*:[[:print:]]+ ]]; then
         echo "function ${item#fu*:}"
     elif [[ $item =~ d[[:alnum:]]*:[[:print:]]+ ]]; then
-        echo "dotfile ${item#d*:}"
-    else
+        local found=false
+        for dir in "" "${ADDITIONAL_DIRS[@]}"; do
+            if [[ -d $DOTFILES_ROOT/$dir/${item#d*:} ]] && [[ -f $DOTFILES_ROOT/$dir/${item#d*:}/bootstrap.sh ]]; then
+                found=true
+                echo "dotfile ${dir:+${dir}/}${item#d*:}"
+                break
+            fi
+        done
+        # if not found, let upper level handle this
+        $found || echo "dotfile ${item#d*:}"
+    elif [[ $item =~ e[[:alnum:]]*:[[:print:]]+ ]]; then
         echo "executable ${item#e*:}"
+    else
+        # noprefix, first treat as executable
+        local is_executable=true
+        if ! command -v "$item" >/dev/null 2>&1; then
+            # if command not found, and bootstrap script for the dotfile
+            # of same name is found, treat as dotfile
+            for dir in "" "${ADDITIONAL_DIRS[@]}"; do
+                if [[ -d $DOTFILES_ROOT/$dir/$item ]] && [[ -f $DOTFILES_ROOT/$dir/$item/bootstrap.sh ]]; then
+                    is_executable=false
+                    echo "dotfile ${dir:+${dir}/}$item"
+                    break
+                fi
+            done
+        fi
+        # in all other cases still treat as executable
+        $is_executable && echo "executable $item"
     fi
 }
 
 # $@: all dotfiles to install
 dependency_loop_detection() {
-    local -a examQueue
+    local -a exam_queue
     for dotfile in "$@"; do
-        examQueue+=("$dotfile")
-        examQueueLevel+=("1")
+        exam_queue+=("$dotfile")
+        exam_queue_level+=("1")
     done
 
     # non-recursive DFS to find all dependency loops
-    local -A dependsSet
-    local -a dependsStack # dependsStack[-1] is stack top
-    while [[ ${#examQueue[@]} -ne 0 ]]; do
-        local curDotfile="${examQueue[0]}"
-        local curDotfileLevel="${examQueueLevel[0]}"
-        examQueue=("${examQueue[@]:1}")
-        examQueueLevel=("${examQueueLevel[@]:1}")
+    local -A deps_set
+    local -a deps_stack # deps_stack[-1] is stack top
+    while [[ ${#exam_queue[@]} -ne 0 ]]; do
+        local cur_dotfile="${exam_queue[0]}"
+        local cur_dotfile_level="${exam_queue_level[0]}"
+        exam_queue=("${exam_queue[@]:1}")
+        exam_queue_level=("${exam_queue_level[@]:1}")
 
         # set depends stack to correct level
-        while [[ ${#dependsStack[@]} -ne $((curDotfileLevel - 1)) ]]; do
-            unset dependsSet["${dependsStack[-1]}"]
-            dependsStack=("${dependsStack[@]::${#dependsStack[@]}-1}")
+        while [[ ${#deps_stack[@]} -ne $((cur_dotfile_level - 1)) ]]; do
+            unset deps_set["${deps_stack[-1]}"]
+            deps_stack=("${deps_stack[@]::${#deps_stack[@]}-1}")
         done
 
         # check for dependency loop
-        if [[ -n ${dependsSet[$curDotfile]} ]]; then
+        if [[ -n ${deps_set[$cur_dotfile]} ]]; then
             local loop
-            for depend in "${dependsStack[@]}"; do
-                if [[ "$depend" == "$curDotfile" ]]; then
+            for depend in "${deps_stack[@]}"; do
+                if [[ "$depend" == "$cur_dotfile" ]]; then
                     loop+="[1m[31m${depend}[0m -> "
                 else
                     loop+="$depend -> "
                 fi
             done
-            loop+="[1m[31m$curDotfile[0m"
+            loop+="[1m[31m$cur_dotfile[0m"
             error "Dependency loop detected: $loop"
             unset loop
             return 1
         fi
 
         # read all dependency of current dotfile
-        if [[ ! -f "$DOTFILES_ROOT/$curDotfile/bootstrap.sh" ]]; then
-            chain=$(printf "%s -> " "${dependsStack[@]}")
-            chain+="$curDotfile"
+        if [[ ! -f "$DOTFILES_ROOT/$cur_dotfile/bootstrap.sh" ]]; then
+            chain=$(printf "%s -> " "${deps_stack[@]}")
+            chain+="$cur_dotfile"
             error "Dependency chain: $chain," \
-                "but '$DOTFILES_ROOT/$curDotfile/bootstrap.sh' does not exist."
+                "but '$DOTFILES_ROOT/$cur_dotfile/bootstrap.sh' does not exist."
             return 1
         fi
         mapfile -t depends < <(
             set -eo pipefail
-            source "$DOTFILES_ROOT/$curDotfile/bootstrap.sh" >/dev/null 2>&1
+            source "$DOTFILES_ROOT/$cur_dotfile/bootstrap.sh" >/dev/null 2>&1
             for depend in "${depends[@]}"; do
                 read -r dep_type dep_name <<<"$(dependency_type_and_name "$depend")"
                 if [[ $dep_type == dotfile ]]; then
@@ -330,12 +352,12 @@ dependency_loop_detection() {
             done
         )
         if [[ ${#depends[@]} -ne 0 ]]; then
-            examQueue=("${depends[@]}" "${examQueue[@]}")
+            exam_queue=("${depends[@]}" "${exam_queue[@]}")
             for ((i = 0; i < ${#depends[@]}; ++i)); do
-                examQueueLevel=("$((curDotfileLevel + 1))" "${examQueueLevel[@]}")
+                exam_queue_level=("$((cur_dotfile_level + 1))" "${exam_queue_level[@]}")
             done
-            dependsStack+=("$curDotfile")
-            dependsSet["$curDotfile"]=1
+            deps_stack+=("$cur_dotfile")
+            deps_set["$cur_dotfile"]=1
         fi
     done
     return 0
@@ -343,19 +365,19 @@ dependency_loop_detection() {
 
 # $@ all dotfiles to install
 list_and_sort_dependencies() {
-    local -a examQueue
+    local -a exam_queue
     for dotfile in "$@"; do
-        examQueue+=("$dotfile")
+        exam_queue+=("$dotfile")
     done
 
     # Use BFS to get the topological order
     # Yeah I know this function can be merged with dependency_loop_detection
     # but for the sake of simplicity and readability I'll just use BFS here
-    for ((i = 0; i < ${#examQueue[@]}; ++i)); do
-        local curDotfile="${examQueue[$i]}"
+    for ((i = 0; i < ${#exam_queue[@]}; ++i)); do
+        local cur_dotfile="${exam_queue[$i]}"
         mapfile -t depends < <(
             set -eo pipefail
-            source "$DOTFILES_ROOT/$curDotfile/bootstrap.sh" >/dev/null 2>&1
+            source "$DOTFILES_ROOT/$cur_dotfile/bootstrap.sh" >/dev/null 2>&1
             for depend in "${depends[@]}"; do
                 read -r dep_type dep_name <<<"$(dependency_type_and_name "$depend")"
                 if [[ $dep_type == dotfile ]]; then
@@ -364,15 +386,15 @@ list_and_sort_dependencies() {
             done
         )
         if [[ ${#depends[@]} -ne 0 ]]; then
-            examQueue=("${examQueue[@]}" "${depends[@]}")
+            exam_queue+=("${depends[@]}")
         fi
     done
 
-    local -A uniqueSet
-    for ((i = 1; i <= ${#examQueue[@]}; ++i)); do
-        if [[ -z ${uniqueSet[${examQueue[-$i]}]} ]]; then
-            uniqueSet[${examQueue[-$i]}]=1
-            echo "${examQueue[-$i]}"
+    local -A unique_set
+    for ((i = 1; i <= ${#exam_queue[@]}; ++i)); do
+        if [[ -z ${unique_set[${exam_queue[-$i]}]} ]]; then
+            unique_set[${exam_queue[-$i]}]=1
+            echo "${exam_queue[-$i]}"
         fi
     done
 }
