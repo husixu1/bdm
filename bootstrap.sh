@@ -138,9 +138,6 @@ main() {
             return 0
         fi
 
-        # TODO: before parsing dependency graph:
-        # check non-prefixed depends. First mark them as executable (e*:). If they are satisfied and not in the `packages` dir, Search them in the `Software` dir and mark them as dotfiles (d*:). doing so alows adding extra software build scripts without doing changes on the original bootstrap script
-
         # Parse dependency graph
         ${install_options[checkdeps]} && {
             # Check for dependency loop
@@ -481,7 +478,7 @@ install_dotfiles() {
                 done
 
                 if [[ ${#missing_deps_check[@]} -gt 0 ]]; then
-                    warning "$dotfile: Dependency missing: ${missing_deps_check[*]}"
+                    info "$dotfile: Dependency missing: ${missing_deps_check[*]}" >&2
                 fi
                 unset missing_deps_check
 
@@ -667,13 +664,10 @@ THISDIR=$(
 )
 
 declare -a depends=()
-export depends
 
 declare -A packages=()
-export packages
 
 declare -a tags=(t:r:arch t:u:arch)
-export tags
 
 if $ISROOT; then
     if [[ $DISTRO == arch ]]; then
@@ -684,6 +678,10 @@ else
     # depends+=(gcc make "${depends[@]}")
     : # non-root installation
 fi
+
+export depends
+export packages
+export tags
 
 install() {
     transaction
