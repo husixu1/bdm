@@ -351,7 +351,7 @@ dependency_loop_detection() {
             chain=$(printf "%s -> " "${deps_stack[@]}")
             chain+="$cur_dotfile"
             error "Dependency chain: $chain," \
-                "but '$DOTFILES_ROOT/$cur_dotfile/bootstrap.sh' does not exist."
+                "but 'bootstrap.sh' script for '$cur_dotfile' does not exist."
             return 1
         fi
         mapfile -t depends < <(
@@ -430,8 +430,9 @@ install_dotfiles() {
                 # run in subshell. exit when any error happens
                 set -eo pipefail
 
+                # Do not redirect stderror to allow error reporting in dotfile scripts
                 # shellcheck source=./vim/bootstrap.sh
-                source "$DOTFILES_ROOT/$dotfile/bootstrap.sh" >/dev/null 2>&1
+                source "$DOTFILES_ROOT/$dotfile/bootstrap.sh" >/dev/null
 
                 # these variables are defined in subshell and does not interfere with the variables outside
                 declare -a missing_deps_install=()
