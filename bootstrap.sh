@@ -675,7 +675,7 @@ if $ISROOT; then
         : # add more distros use #elif
     fi
 else
-    # depends+=(gcc make "${depends[@]}")
+    # depends=(gnu-tools tar "${depends[@]}")
     : # non-root installation
 fi
 
