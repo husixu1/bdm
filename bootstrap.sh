@@ -124,6 +124,10 @@ main() {
 
         # require root if not in usermode
         ${install_options[usermode]} || require_and_hold_root_access || return 1
+        ${install_options[usermode]} && {
+            export PATH="$USER_PREFIX/bin:$PATH"
+            export LD_LIBRARY_PATH="$USER_PREFIX/lib64:$USER_PREFIX/lib:$LD_LIBRARY_PATH"
+        }
 
         # dotfiles to install
         local -a dotfiles
@@ -572,19 +576,29 @@ install_dotfiles() {
 
     # 3. install dotfiles
     for dotfile in "${dotfiles[@]}"; do
-        (
+        local post_install
+        post_install="$(
             set -eo pipefail
             # shellcheck source=./vim/bootstrap.sh
-            source "$DOTFILES_ROOT/$dotfile/bootstrap.sh" >/dev/null 2>&1
+            source "$DOTFILES_ROOT/$dotfile/bootstrap.sh" >/dev/null
 
             if [[ $(type -t "install") == "function" ]]; then
-                install
+                install >/dev/null
             else
                 warning "'install()' not defined in '$dotfile/bootstrap.sh', skipping."
             fi
-        )
+
+            if [[ $(type -t "post_install") == "function" ]]; then
+                post_install
+            fi
+        )"
         [[ $? == 0 ]] || {
             warning "Failed installing $dotfile"
+            return 1
+        }
+
+        eval "$post_install" || {
+            error "$dotfile: Failed evaluating the output of post_install. Aborting to avoid subsequent failures..."
             return 1
         }
     done
