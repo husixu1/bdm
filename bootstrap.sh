@@ -77,6 +77,10 @@ main() {
         [installdeps]=false
         [usermode]=false
     )
+    local -A list_options=(
+        [rundeps]=false
+        [makedeps]=false
+    )
 
     # TODO: add a function to export dependency graph
     case $cmd in
@@ -144,17 +148,22 @@ main() {
 
         # Parse dependency graph
         ${install_options[checkdeps]} && {
-            # Check for dependency loop
-            dependency_loop_detection "${dotfiles[@]}" || {
-                error "Depencency checking failed"
-                return 1
-            }
+            if ${install_options[installdeps]}; then
+                # Check for dependency loop, including makedepends
+                dependency_loop_detection makedepends "${dotfiles[@]}" || {
+                    error "Depencency checking failed"
+                    return 1
+                }
 
-            # add all dependency to 'dotfiles' and correct their order,
-            # if automatic dependency install is enabled
-            ${install_options[installdeps]} && {
-                mapfile -t dotfiles < <(list_and_sort_dependencies "${dotfiles[@]}")
-            }
+                # add all dependency, including makedepends to 'dotfiles' and correct their order,
+                mapfile -t dotfiles < <(list_and_sort_dependencies makedepends "${dotfiles[@]}")
+            else
+                # Only check for running depends (the `depends` vector)
+                dependency_loop_detection rundepends "${dotfiles[@]}" || {
+                    error "Dependency checking failed"
+                    return 1
+                }
+            fi
         }
         echo "dotfiles to install: ${dotfiles[*]}"
         echo -n "Proceed? [Y/n]: "
@@ -194,11 +203,57 @@ main() {
         ;;
     l*)
         cmd="list" # List packages
-        while read -r dotfile; do
-            if [[ -f $DOTFILES_ROOT/$dotfile/bootstrap.sh ]]; then
-                echo "$dotfile"
-            fi
-        done < <(ls "$DOTFILES_ROOT")
+        while [[ $1 =~ $_OPTION_PATTERN ]]; do
+            case $1 in
+            '-d' | '--depends')
+                list_options[rundeps]=true
+                ;;
+            '-m' | '--makedepends')
+                list_options[makedeps]=true
+                ;;
+            *)
+                error "Option $1 unrecognized"
+                exit 1
+                ;;
+            esac
+            shift
+        done
+
+        # dotfiles to list
+        local -a dotfiles
+
+        # filter a list of valid dotfiles
+        local valid_dotfiles
+        valid_dotfiles="$(filter_valid_dotfiles "$@")"
+        if [[ -n $valid_dotfiles ]]; then
+            mapfile -t dotfiles <<<"$valid_dotfiles"
+        else
+            warning "No dotfile to list..."
+            return 0
+        fi
+
+        if ${list_options[makedeps]}; then
+            # Check for dependency loop, including makedepends
+            dependency_loop_detection makedepends "${dotfiles[@]}" || {
+                error "Depencency checking failed"
+                return 1
+            }
+            # add all dependency, including makedepends to 'dotfiles' and correct their order,
+            mapfile -t dotfiles < <(list_and_sort_dependencies makedepends "${dotfiles[@]}")
+            echo "${dotfiles[*]}"
+        elif ${list_options[rundeps]}; then
+            # Check for dependency loop, including makedepends
+            dependency_loop_detection rundepends "${dotfiles[@]}" || {
+                error "Depencency checking failed"
+                return 1
+            }
+            # add all dependency, including makedepends to 'dotfiles' and correct their order,
+            mapfile -t dotfiles < <(list_and_sort_dependencies rundepends "${dotfiles[@]}")
+            echo "${dotfiles[*]}"
+        else
+            echo "${dotfiles[*]}"
+        fi
+
         return 0
         ;;
     n*)
@@ -311,9 +366,16 @@ dependency_type_and_name() {
     fi
 }
 
-# $@: all dotfiles to install
+# $1: <rundepends|makedepends>, decide which type of dependency to include.
+#     Note that makedepends implies rundepends
+# ${@:1}: all dotfiles to install
 dependency_loop_detection() {
+    local add_makedepends=false
+    [[ $1 == makedepends ]] && add_makedepends=true
+    shift
+
     local -a exam_queue
+    local -a exam_queue_level
     for dotfile in "$@"; do
         exam_queue+=("$dotfile")
         exam_queue_level+=("1")
@@ -352,22 +414,24 @@ dependency_loop_detection() {
 
         # read all dependency of current dotfile
         if [[ ! -f "$DOTFILES_ROOT/$cur_dotfile/bootstrap.sh" ]]; then
+            local chain
             chain=$(printf "%s -> " "${deps_stack[@]}")
             chain+="$cur_dotfile"
             error "Dependency chain: $chain," \
                 "but 'bootstrap.sh' script for '$cur_dotfile' does not exist."
             return 1
         fi
-        mapfile -t depends < <(
-            set -eo pipefail
-            source "$DOTFILES_ROOT/$cur_dotfile/bootstrap.sh" >/dev/null 2>&1
-            for depend in "${depends[@]}"; do
-                read -r dep_type dep_name <<<"$(dependency_type_and_name "$depend")"
-                if [[ $dep_type == dotfile ]]; then
-                    echo "$dep_name"
-                fi
-            done
-        )
+
+        local -a depends
+        mapfile -t depends < <(extract_dotfile_depends rundepends "$cur_dotfile")
+
+        # add makedepends if required
+        if $add_makedepends; then
+            local -a makedepends
+            mapfile -t makedepends < <(extract_dotfile_depends makedepends "$cur_dotfile")
+            depends+=("${makedepends[@]}")
+        fi
+
         if [[ ${#depends[@]} -ne 0 ]]; then
             exam_queue=("${depends[@]}" "${exam_queue[@]}")
             for ((i = 0; i < ${#depends[@]}; ++i)); do
@@ -380,28 +444,34 @@ dependency_loop_detection() {
     return 0
 }
 
-# $@ all dotfiles to install
+# $1: <rundepends|makedepends>, decide which type of dependency to include.
+#     Note that makedepends implies rundepends
+# ${@:1} all dotfiles to install
 list_and_sort_dependencies() {
+    local add_makedepends=false
+    [[ $1 == makedepends ]] && add_makedepends=true
+    shift
+
     local -a exam_queue
     for dotfile in "$@"; do
         exam_queue+=("$dotfile")
     done
 
-    # Use BFS to get the topological order
-    # Yeah I know this function can be merged with dependency_loop_detection
-    # but for the sake of simplicity and readability I'll just use BFS here
+    # Use BFS to get the topological order.
+    # Yeah I know this function can be merged with dependency_loop_detection,
+    # but for the sake of simplicity and readability I'll just use BFS here.
     for ((i = 0; i < ${#exam_queue[@]}; ++i)); do
         local cur_dotfile="${exam_queue[$i]}"
-        mapfile -t depends < <(
-            set -eo pipefail
-            source "$DOTFILES_ROOT/$cur_dotfile/bootstrap.sh" >/dev/null 2>&1
-            for depend in "${depends[@]}"; do
-                read -r dep_type dep_name <<<"$(dependency_type_and_name "$depend")"
-                if [[ $dep_type == dotfile ]]; then
-                    echo "$dep_name"
-                fi
-            done
-        )
+        local -a depends
+        mapfile -t depends < <(extract_dotfile_depends rundepends "$cur_dotfile")
+
+        # add makedepends if required
+        if $add_makedepends; then
+            local -a makedepends
+            mapfile -t makedepends < <(extract_dotfile_depends makedepends "$cur_dotfile")
+            depends+=("${makedepends[@]}")
+        fi
+
         if [[ ${#depends[@]} -ne 0 ]]; then
             exam_queue+=("${depends[@]}")
         fi
@@ -414,6 +484,38 @@ list_and_sort_dependencies() {
             echo "${exam_queue[-$i]}"
         fi
     done
+}
+
+# Extract `d*:` types dependencies from dotfiles' bootstrap file
+# $1: <rundepends|makedepends>, decide which type of dependency to include.
+# $2: name of the dotfile
+extract_dotfile_depends() {
+    if [[ $1 == makedepends ]]; then
+        (
+            set -eo pipefail
+            source "$DOTFILES_ROOT/$2/bootstrap.sh" >/dev/null 2>&1
+            for depend in "${makedepends[@]}"; do
+                read -r dep_type dep_name <<<"$(dependency_type_and_name "$depend")"
+                if [[ $dep_type == dotfile ]]; then
+                    echo "$dep_name"
+                fi
+            done
+        )
+    elif [[ $1 == rundepends ]]; then
+        (
+            set -eo pipefail
+            source "$DOTFILES_ROOT/$cur_dotfile/bootstrap.sh" >/dev/null 2>&1
+            for depend in "${depends[@]}"; do
+                read -r dep_type dep_name <<<"$(dependency_type_and_name "$depend")"
+                if [[ $dep_type == dotfile ]]; then
+                    echo "$dep_name"
+                fi
+            done
+        )
+    else
+        error "extract_dotfile_depends: Unrecognized option $1"
+        exit 1
+    fi
 }
 
 # require: 'install_options' map set
@@ -616,6 +718,7 @@ _HELP_MESSAGE="\
     ${BASH_SOURCE[0]} install -i all
     ${BASH_SOURCE[0]} uninstall git
     ${BASH_SOURCE[0]} check tmux
+    ${BASH_SOURCE[0]} list -d vim tmux
 
 [1mCOMMAND[0m
     i*, install
@@ -651,6 +754,13 @@ _HELP_MESSAGE="\
 
 [1mOPTIONS (uninstall)[0m
     Note that this bootstrap script does not provide functionality to uninstall previously installed dependencies. Please use your distro's package manager or manually uninstall the dependencies. You can check each dotfiles' bootstrap.sh to see what is installed exactly.
+
+[1mOPTIONS (list)[0m
+    -d, --depends
+        Also list dependency chain for each package
+
+    -m, --makedepends (overrides -d)
+        Also list makedepends chain for each package.
 
 [1mPKGS[0m
     <name>
