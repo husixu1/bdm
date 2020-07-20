@@ -326,6 +326,7 @@ require_and_hold_root_access() {
 # $1 dependency string
 # print: two string: <type> <name>, separated with space, can be read
 # into variable with `read -r type name`
+# return: 1 if dependency has unknown prefix. 0 otherwise.
 dependency_type_and_name() {
     local item="$1"
     if [[ $item =~ fi[[:alnum:]]*:[[:print:]]+ ]]; then
@@ -347,6 +348,9 @@ dependency_type_and_name() {
         $found || echo "dotfile ${item#d*:}"
     elif [[ $item =~ e[[:alnum:]]*:[[:print:]]+ ]]; then
         echo "executable ${item#e*:}"
+    elif [[ $item =~ [[:alnum:]]+:[[:print:]]+ ]]; then
+        echo "unknown ${item#*:}"
+        return 1
     else
         # noprefix, first treat as executable
         local is_executable=true
@@ -581,6 +585,9 @@ install_dotfiles() {
                                 "'packages' array is ignored. Please consider" \
                                 "removing it."
                         # Skip. dotfile dependency is already handled before this checking step.
+                    elif [[ $dep_type == 'unknown' ]]; then
+                        error "$dotfile: unrecognized dependency prefix in '${item}'"
+                        return 1
                     fi
                 done
 
@@ -678,8 +685,7 @@ install_dotfiles() {
 
     # 3. install dotfiles
     for dotfile in "${dotfiles[@]}"; do
-        local post_install
-        post_install="$(
+        (
             set -eo pipefail
             # shellcheck source=./vim/bootstrap.sh
             source "$DOTFILES_ROOT/$dotfile/bootstrap.sh" >/dev/null
@@ -689,19 +695,29 @@ install_dotfiles() {
             else
                 warning "'install()' not defined in '$dotfile/bootstrap.sh', skipping."
             fi
-
-            if [[ $(type -t "post_install") == "function" ]]; then
-                post_install
-            fi
-        )"
+        )
         [[ $? == 0 ]] || {
             warning "Failed installing $dotfile"
             return 1
         }
 
-        eval "$post_install" || {
-            error "$dotfile: Failed evaluating the output of post_install. Aborting to avoid subsequent failures..."
-            return 1
+        local post_install_func
+        post_install_func="$(
+            if [[ $(type -t "post_install") == "function" ]]; then
+                type post_install
+            fi
+        )"
+
+        [[ -n ${post_install_func} ]] && {
+            # the #*$'\n' suffix removes the first line of the output of `type`,
+            # which should be "xxx is a function". I don't to use sed/grep here
+            # as it's not pure bash.
+            eval "${post_install_func#*$'\n'}"
+
+            post_install || {
+                error "$dotfile: Failed evaluating the post_install function. Aborting to avoid subsequent failures..."
+                return 1
+            }
         }
     done
 
@@ -805,8 +821,11 @@ else
 fi
 
 export depends
+export makedepends
 export packages
 export tags
+
+################################################################################
 
 install() {
     transaction
