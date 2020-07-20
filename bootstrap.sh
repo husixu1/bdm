@@ -789,7 +789,7 @@ THISDIR=$(
 )
 
 declare -a depends=()
-
+declare -a makedepends=()
 declare -A packages=()
 
 declare -a tags=(t:r:arch t:u:arch)
@@ -797,10 +797,10 @@ declare -a tags=(t:r:arch t:u:arch)
 if $ISROOT; then
     if [[ $DISTRO == arch ]]; then
         # packages+=()
-        : # add more distros use #elif
+        : # add more distros with #elif
     fi
 else
-    # depends=(gnu-tools tar "${depends[@]}")
+    makedepends=(gnu-tools tar)
     : # non-root installation
 fi
 
