@@ -261,6 +261,10 @@ main() {
         [[ $cmd == "new" ]] && {
             info "Creating package '$1'"
             mkdir -p "$DOTFILES_ROOT/$1"
+            [[ -f "$DOTFILES_ROOT/$1/bootstrap.sh" ]] && {
+                error "$DOTFILES_ROOT/$1/bootstrap.sh exists."
+                return 1
+            }
             echo "$_BOOTSTRAP_TEMPLATE" >"$DOTFILES_ROOT/$1/bootstrap.sh"
             return 0
         }
@@ -433,7 +437,7 @@ dependency_loop_detection() {
         if $add_makedepends; then
             local -a makedepends
             mapfile -t makedepends < <(extract_dotfile_depends makedepends "$cur_dotfile")
-            depends+=("${makedepends[@]}")
+            depends=("${makedepends[@]}" "${depends[@]}")
         fi
 
         if [[ ${#depends[@]} -ne 0 ]]; then
@@ -469,11 +473,11 @@ list_and_sort_dependencies() {
         local -a depends
         mapfile -t depends < <(extract_dotfile_depends rundepends "$cur_dotfile")
 
-        # add makedepends if required
+        # add makedepends in front of rundepends, if required
         if $add_makedepends; then
             local -a makedepends
             mapfile -t makedepends < <(extract_dotfile_depends makedepends "$cur_dotfile")
-            depends+=("${makedepends[@]}")
+            depends=("${makedepends[@]}" "${depends[@]}")
         fi
 
         if [[ ${#depends[@]} -ne 0 ]]; then
@@ -497,6 +501,8 @@ extract_dotfile_depends() {
     if [[ $1 == makedepends ]]; then
         (
             set -eo pipefail
+            # avoid variable contamination of parent shell
+            unset makedepends
             source "$DOTFILES_ROOT/$2/bootstrap.sh" >/dev/null 2>&1
             for depend in "${makedepends[@]}"; do
                 read -r dep_type dep_name <<<"$(dependency_type_and_name "$depend")"
@@ -508,7 +514,9 @@ extract_dotfile_depends() {
     elif [[ $1 == rundepends ]]; then
         (
             set -eo pipefail
-            source "$DOTFILES_ROOT/$cur_dotfile/bootstrap.sh" >/dev/null 2>&1
+            # avoid variable contamination of parent shell
+            unset depends
+            source "$DOTFILES_ROOT/$2/bootstrap.sh" >/dev/null 2>&1
             for depend in "${depends[@]}"; do
                 read -r dep_type dep_name <<<"$(dependency_type_and_name "$depend")"
                 if [[ $dep_type == dotfile ]]; then
@@ -634,6 +642,7 @@ install_dotfiles() {
             dotfile_deps_offset["${dotfile}_end"]=${#missing_deps[@]}
         done
 
+        ${install_options[installdeps]} && {
         # 2. install all the missing dependencies
         for dotfile in "${dotfiles[@]}"; do
             (
@@ -681,6 +690,7 @@ install_dotfiles() {
                 return 1
             }
         done
+        }
     }
 
     # 3. install dotfiles
