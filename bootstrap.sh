@@ -643,53 +643,53 @@ install_dotfiles() {
         done
 
         ${install_options[installdeps]} && {
-        # 2. install all the missing dependencies
-        for dotfile in "${dotfiles[@]}"; do
-            (
-                set -eo pipefail
-                # shellcheck source=./vim/bootstrap.sh
-                source "$DOTFILES_ROOT/$dotfile/bootstrap.sh" >/dev/null 2>&1
+            # 2. install all the missing dependencies
+            for dotfile in "${dotfiles[@]}"; do
+                (
+                    set -eo pipefail
+                    # shellcheck source=./vim/bootstrap.sh
+                    source "$DOTFILES_ROOT/$dotfile/bootstrap.sh" >/dev/null 2>&1
 
-                for ((i = dotfile_deps_offset["${dotfile}_start"]; i < dotfile_deps_offset["${dotfile}_end"]; ++i)); do
-                    declare dep="${missing_deps["$i"]}"
-                    declare pkg="${packages["$dep"]}"
-                    if [[ $pkg =~ f[[:alnum:]]*:[[:print:]]+ ]]; then
+                    for ((i = dotfile_deps_offset["${dotfile}_start"]; i < dotfile_deps_offset["${dotfile}_end"]; ++i)); do
+                        declare dep="${missing_deps["$i"]}"
+                        declare pkg="${packages["$dep"]}"
+                        if [[ $pkg =~ f[[:alnum:]]*:[[:print:]]+ ]]; then
 
-                        # package should be installed through function, in a subshell,
-                        # so that set -e works correctly (both "exceptions" and returned error code are captured)
-                        # We have to use this crooked way to simulate try-catch ...
-                        # As above, see https://stackoverflow.com/questions/29532904/bash-subshell-errexit-semantics
-                        set +e
-                        (
+                            # package should be installed through function, in a subshell,
+                            # so that set -e works correctly (both "exceptions" and returned error code are captured)
+                            # We have to use this crooked way to simulate try-catch ...
+                            # As above, see https://stackoverflow.com/questions/29532904/bash-subshell-errexit-semantics
+                            set +e
+                            (
+                                set -e
+                                ${pkg#f*:}
+                            )
+                            [[ $? == 0 ]] || {
+                                error "$dotfile: Failed executing function ${pkg#f*:}."
+                                return 1
+                            }
                             set -e
-                            ${pkg#f*:}
-                        )
-                        [[ $? == 0 ]] || {
-                            error "$dotfile: Failed executing function ${pkg#f*:}."
-                            return 1
-                        }
-                        set -e
-                    else
-                        # package should be installed through package manager.
-                        install_pkg_command="install_system_package_${DISTRO} ${pkg#s*:}"
-                        set +e
-                        (
+                        else
+                            # package should be installed through package manager.
+                            install_pkg_command="install_system_package_${DISTRO} ${pkg#s*:}"
+                            set +e
+                            (
+                                set -e
+                                $install_pkg_command
+                            )
+                            [[ $? == 0 ]] || {
+                                error "$dotfile: Failed installing system package ${pkg#s*:}."
+                                return 1
+                            }
                             set -e
-                            $install_pkg_command
-                        )
-                        [[ $? == 0 ]] || {
-                            error "$dotfile: Failed installing system package ${pkg#s*:}."
-                            return 1
-                        }
-                        set -e
-                    fi
-                done
-            )
-            [[ $? == 0 ]] || {
-                error "Dependency installation failed, aborting... "
-                return 1
-            }
-        done
+                        fi
+                    done
+                )
+                [[ $? == 0 ]] || {
+                    error "Dependency installation failed, aborting... "
+                    return 1
+                }
+            done
         }
     }
 
