@@ -165,7 +165,7 @@ main() {
                 }
             fi
         }
-        echo "dotfiles to install: ${dotfiles[*]}"
+        echo "dotfiles to check/install: ${dotfiles[*]}"
         echo -n "Proceed? [Y/n]: "
         read -r ans
         [[ $ans == n ]] && return 0
