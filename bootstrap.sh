@@ -829,7 +829,7 @@ else
     # non-root installation
     # makedepends=(gnu-tools tar curl)
     packages+=()
-    # installPackage() {
+    # install<Package>() {
     #     local tempdir
     #     tempdir=$(mktemp -d)
     #     pushd "$tempdir" || exit 1
