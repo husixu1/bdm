@@ -536,14 +536,14 @@ install_dotfiles() {
     # Three steps to install all the dotfiles. the first two steps are skipped
     # if 'install_options[checkdeps]' is false
 
-    ${install_options[checkdeps]} && {
-        # 1. check if all dependencies in the 'depends' array, if dependency is not
-        # met, check if there's a entry in the 'packages' array to install it
-        local -A dotfile_deps_offset
-        local -a missing_deps
+    for dotfile in "${dotfiles[@]}"; do
+        info "Processing $dotfile ..."
+        ${install_options[checkdeps]} && {
+            # 1. check if all dependencies in the 'depends' array, if dependency is not
+            # met, check if there's a entry in the 'packages' array to install it
+            local -a missing_deps=()
 
-        for dotfile in "${dotfiles[@]}"; do
-            local -a missing_deps_install
+            local missing_deps_list=""
             missing_deps_list=$(
                 # run in subshell. exit when any error happens
                 set -eo pipefail
@@ -600,7 +600,7 @@ install_dotfiles() {
                 done
 
                 if [[ ${#missing_deps_check[@]} -gt 0 ]]; then
-                    info "$dotfile: Dependency missing: ${missing_deps_check[*]}" >&2
+                    warning "$dotfile: Dependency missing: ${missing_deps_check[*]}" >&2
                 fi
                 unset missing_deps_check
 
@@ -636,22 +636,16 @@ install_dotfiles() {
 
             # note that '<<<' always create a '\n' terminated string
             [[ -n $missing_deps_list ]] &&
-                mapfile -t missing_deps_install <<<"$missing_deps_list"
-            dotfile_deps_offset["${dotfile}_start"]=${#missing_deps[@]}
-            missing_deps+=("${missing_deps_install[@]}")
-            dotfile_deps_offset["${dotfile}_end"]=${#missing_deps[@]}
-        done
+                mapfile -t missing_deps <<<"$missing_deps_list"
 
-        ${install_options[installdeps]} && {
-            # 2. install all the missing dependencies
-            for dotfile in "${dotfiles[@]}"; do
+            ${install_options[installdeps]} && {
+                # 2. install all the missing dependencies
                 (
                     set -eo pipefail
                     # shellcheck source=./vim/bootstrap.sh
                     source "$DOTFILES_ROOT/$dotfile/bootstrap.sh" >/dev/null 2>&1
 
-                    for ((i = dotfile_deps_offset["${dotfile}_start"]; i < dotfile_deps_offset["${dotfile}_end"]; ++i)); do
-                        declare dep="${missing_deps["$i"]}"
+                    for dep in "${missing_deps[@]}"; do
                         declare pkg="${packages["$dep"]}"
                         if [[ $pkg =~ f[[:alnum:]]*:[[:print:]]+ ]]; then
 
@@ -678,7 +672,7 @@ install_dotfiles() {
                                 $install_pkg_command
                             )
                             [[ $? == 0 ]] || {
-                                error "$dotfile: Failed installing system package ${pkg#s*:}."
+                                error "$dotfile: Failed installing system package ${pkg#s*:} (for dependency $dep)."
                                 return 1
                             }
                             set -e
@@ -689,12 +683,10 @@ install_dotfiles() {
                     error "Dependency installation failed, aborting... "
                     return 1
                 }
-            done
+            }
         }
-    }
 
-    # 3. install dotfiles
-    for dotfile in "${dotfiles[@]}"; do
+        # 3. install dotfiles
         (
             set -eo pipefail
             # shellcheck source=./vim/bootstrap.sh
@@ -713,21 +705,29 @@ install_dotfiles() {
 
         local post_install_func
         post_install_func="$(
+            set -eo pipefail
+            # shellcheck source=./vim/bootstrap.sh
+            source "$DOTFILES_ROOT/$dotfile/bootstrap.sh" >/dev/null
+
             if [[ $(type -t "post_install") == "function" ]]; then
                 type post_install
             fi
         )"
 
+        # the #*$'\n' suffix removes the first line of the output of `type`,
+        # which should be "xxx is a function". I don't to use sed/grep here
+        # as it's not pure bash.
+        post_install_func="${post_install_func#*$'\n'}"
         [[ -n ${post_install_func} ]] && {
-            # the #*$'\n' suffix removes the first line of the output of `type`,
-            # which should be "xxx is a function". I don't to use sed/grep here
-            # as it's not pure bash.
-            eval "${post_install_func#*$'\n'}"
+            info "Executing post_install function of $dotfile"
+            eval "${post_install_func}"
 
             post_install || {
                 error "$dotfile: Failed evaluating the post_install function. Aborting to avoid subsequent failures..."
                 return 1
             }
+
+            unset post_install
         }
     done
 
@@ -826,8 +826,17 @@ if $ISROOT; then
         : # add more distros with #elif
     fi
 else
-    makedepends=(gnu-tools tar)
-    : # non-root installation
+    # non-root installation
+    # makedepends=(gnu-tools tar curl)
+    packages+=()
+    # installPackage() {
+    #     local tempdir
+    #     tempdir=$(mktemp -d)
+    #     pushd "$tempdir" || exit 1
+    #     # ...
+    #     popd || exit 1
+    #     rm -rf "$tempdir"
+    # }
 fi
 
 export depends
