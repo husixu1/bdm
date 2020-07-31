@@ -13,13 +13,13 @@
 # }
 
 error() {
-    echo "BOOTSTRAP-ERR: " "$@" >&2
+    echo "[1m[91mERR:[0m " "$@" >&2
 }
 
 warning() {
-    echo "BOOTSTRAP-WRN: " "$@" >&2
+    echo "[1m[93mWRN:[0m " "$@" >&2
 }
 
 info() {
-    echo "BOOTSTRAP-INF: " "$@" >&1
+    echo "[1m[92mINF:[0m " "$@" >&1
 }
