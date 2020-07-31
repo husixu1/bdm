@@ -24,7 +24,7 @@ if [[ ${BASH_VERSINFO[0]} -lt 4 ]] ||
 fi
 
 [[ $EUID -eq 0 ]] && {
-    error "This script cannot be run as root," \
+    echo "This script cannot be run as root," \
         "as it might cause unexpected damage." >&2
     exit 1
 }
@@ -605,14 +605,14 @@ install_dotfiles() {
                 unset missing_deps_check
 
                 declare unable_to_meet_dependency=false
-                for file in "${missing_deps_install[@]}"; do
+                declare pkg
+                for dep in "${missing_deps_install[@]}"; do
                     # pass to outer shell
-                    echo "$file"
-
+                    echo "$dep"
                     # check if this dependency can be meet
-                    declare pkg=${packages[$file]}
+                    pkg="${packages["$dep"]}"
                     if [[ -z $pkg ]]; then
-                        error "$dotfile: Cannot meet dependency '${file}': It's neither installed nor defined in the 'packages' map."
+                        error "$dotfile: Cannot meet dependency '$dep': It's neither installed nor defined in the 'packages' map."
                         unable_to_meet_dependency=true
                     elif ! [[ $pkg =~ f[[:alnum:]]*:[[:print:]]+ ]] && ! $ISROOT; then
                         # installed package through system package manager
