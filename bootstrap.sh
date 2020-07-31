@@ -1,4 +1,4 @@
-#!/bin/env bash
+#!/usr/bin/env bash
 # shellcheck disable=SC1090
 # shellcheck disable=SC2181
 
@@ -801,7 +801,7 @@ _HELP_MESSAGE="\
 
 # shellcheck disable=SC2016
 _BOOTSTRAP_TEMPLATE="\
-"'#!/bin/env bash
+"'#!/usr/bin/env bash
 # shellcheck disable=SC1090
 
 source "$DOTFILES_ROOT/.lib/utils.sh"
