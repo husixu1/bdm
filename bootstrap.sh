@@ -185,7 +185,21 @@ main() {
             esac
             shift
         done
-        uninstallDotfiles
+
+        # dotfiles to uninstall
+        local -a dotfiles
+
+        # filter a list of valid dotfiles
+        local valid_dotfiles
+        valid_dotfiles="$(filter_valid_dotfiles "$@")"
+        if [[ -n $valid_dotfiles ]]; then
+            mapfile -t dotfiles <<<"$valid_dotfiles"
+        else
+            warning "No dotfile to uninstall..."
+            return 0
+        fi
+
+        uninstall_dotfiles
         return $?
         ;;
     c*)
@@ -730,8 +744,29 @@ install_dotfiles() {
             unset post_install
         }
     done
+}
 
-    # TODO: test this function
+uninstall_dotfiles() {
+    for dotfile in "${dotfiles[@]}"; do
+        info "Processing $dotfile ..."
+
+        # uninstall dotfiles
+        (
+            set -eo pipefail
+            # shellcheck source=./vim/bootstrap.sh
+            source "$DOTFILES_ROOT/$dotfile/bootstrap.sh" >/dev/null
+
+            if [[ $(type -t "uninstall") == "function" ]]; then
+                uninstall >/dev/null
+            else
+                warning "'uninstall()' not defined in '$dotfile/bootstrap.sh', skipping."
+            fi
+        )
+        [[ $? == 0 ]] || {
+            warning "Failed uninstalling $dotfile"
+            return 1
+        }
+    done
 }
 
 _HELP_MESSAGE="\
