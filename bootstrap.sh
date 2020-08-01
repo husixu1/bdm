@@ -130,7 +130,6 @@ main() {
         ${install_options[usermode]} || require_and_hold_root_access || return 1
         ${install_options[usermode]} && {
             export PATH="$USER_PREFIX/bin:$PATH"
-            export LD_LIBRARY_PATH="$USER_PREFIX/lib64:$USER_PREFIX/lib:$LD_LIBRARY_PATH"
         }
 
         # dotfiles to install
