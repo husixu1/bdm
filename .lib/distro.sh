@@ -61,6 +61,17 @@ install_system_package_linux() {
     warning "General linux package not supported"
 }
 
+get_host_name(){
+    if command -v hostname >/dev/null 2>&1; then
+        hostname
+    elif [[ -f /etc/hostname ]]; then
+        cat /etc/hostname
+    else
+        echo "Unknown"
+        return 1
+    fi
+}
+
 # EXPORTS ######################################################################
 ################################################################################
 
@@ -69,3 +80,7 @@ export LOCAL_CONFIG_DIR
 
 DISTRO=$(distro)
 export DISTRO
+
+HOST_NAME=$(get_host_name)
+export HOST_NAME
+
