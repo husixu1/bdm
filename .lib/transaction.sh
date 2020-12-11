@@ -54,12 +54,13 @@ action() {
         ((++actionParamCount))
     done
 
-    # Add rollback to rollback list
-    _ROLLBACKS+=("$(printf "%q " "${@:$((actionParamCount + 1))}")")
-
     # perform action
     "${@:1:$((actionParamCount - 1))}" || {
         error "Action '${*:1:$((actionParamCount - 1))}' failed. Rolling back..."
         rollback && return 1;
     }
+
+    # Add rollback to rollback list only when action succeeds
+    # (so rollback for the the last failed action will not be executed)
+    _ROLLBACKS+=("$(printf "%q " "${@:$((actionParamCount + 1))}")")
 }
