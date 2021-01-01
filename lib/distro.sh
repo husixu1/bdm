@@ -33,18 +33,23 @@ distro() {
             VER=$(uname -r)
         fi
 
-        if [[ ${OS} =~ ^Arch || ${OS} =~ ^Manjaro ]]; then echo "arch"
-        elif [[ ${OS} =~ ^Debian ]]; then echo "debian_${VER}"
-        elif [[ ${OS} == Termux ]]; then echo "termux"
-        elif [[ ${OS} =~ ^Linux ]]; then echo "linux" # general linux
-        else echo "unsupported"
+        if [[ ${OS} =~ ^Arch || ${OS} =~ ^Manjaro ]]; then
+            echo "arch"
+        elif [[ ${OS} =~ ^Debian ]]; then
+            echo "debian_${VER}"
+        elif [[ ${OS} == Termux ]]; then
+            echo "termux"
+        elif [[ ${OS} =~ ^Linux ]]; then
+            echo "linux" # general linux
+        else
+            echo "unsupported"
         fi
     )
     return 0
 }
 
 check_system_package_arch() { pacman -Q "$1" >/dev/null 2>&1; }
-check_system_package_debian(){ dpkg -s "$1" >/dev/null 2>&1; }
+check_system_package_debian() { dpkg -s "$1" >/dev/null 2>&1; }
 
 install_system_package_arch() {
     # TODO: (maybe) we need "yes" to every question, instead of the default one (--noconfirm)
@@ -56,12 +61,24 @@ install_system_package_debian_9() { sudo apt-get install --yes "$@"; }
 install_system_package_debian_10() { sudo apt-get install --yes "$@"; }
 install_system_package_debian_11() { sudo apt-get install --yes "$@"; }
 install_system_package_termux() { apt install --yes "$@"; }
-install_system_package_linux() {
-    # TODO: maybe flatpak?
-    warning "General linux package not supported"
+install_system_package_linux() { error "General linux package not supported"; }
+
+install_userland_package_pkgsrc() {
+    for pkg in "$@"; do
+        pushd "${CONF__pkgsrc__src_root:?}/$pkg" || {
+            error "Failed to find pkgsrc package: $pkg"
+            continue
+        }
+        "${CONF__pkgsrc__prefix:?}/bin/bmake" install &&
+            "${CONF__pkgsrc__prefix:?}/bin/bmake" package
+        popd || {
+            error "Internal error: popd"
+            return 1
+        }
+    done
 }
 
-get_host_name(){
+get_host_name() {
     if command -v hostname >/dev/null 2>&1; then
         hostname
     elif [[ -f /etc/hostname ]]; then
@@ -83,4 +100,3 @@ export DISTRO
 
 HOST_NAME=$(get_host_name)
 export HOST_NAME
-
