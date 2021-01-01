@@ -2,19 +2,7 @@
 # shellcheck disable=SC1090
 # shellcheck disable=SC2181
 
-# SOME CONFIG THAT CAN BE CHANGED ##############################################
-################################################################################
-# additional directory to search for dotfiles configs (relative to DOTFILES_ROOT)
-ADDITIONAL_DIRS=(Software)
-
-# compilation job count when building things in user mode
-JOB_COUNT=$(command -v nproc >/dev/null 2>&1 && nproc --all)
-JOB_COUNT=${JOB_COUNT:-8}
-JOB_COUNT=$((JOB_COUNT / 2))
-[[ $JOB_COUNT -le 0 ]] && JOB_COUNT=1
-export JOB_COUNT
-
-# STARTUP CHECKING #############################################################
+# Startup Checking #############################################################
 ################################################################################
 # This script requires bash >= 4.3, since it uses `declare -n`
 if [[ ${BASH_VERSINFO[0]} -lt 4 ]] ||
@@ -29,21 +17,41 @@ fi
     exit 1
 }
 
-# EXPORTS ######################################################################
-################################################################################
+# TODO: rename to BDM_ROOT, replace all files
 DOTFILES_ROOT=$(
     cd "$(dirname "${BASH_SOURCE[0]}")" || exit
     pwd
 )
 export DOTFILES_ROOT
 
-USER_PREFIX="$HOME/.local"
-export USER_PREFIX
-
-# INIT & INCLUDES ##############################################################
+# Init & Includes ##############################################################
 ################################################################################
-source "$DOTFILES_ROOT/.lib/utils.sh"
-source "$DOTFILES_ROOT/.lib/distro.sh"
+source "$DOTFILES_ROOT/lib/utils.sh"
+source "$DOTFILES_ROOT/lib/distro.sh"
+source "$DOTFILES_ROOT/lib/read_ini.sh"
+
+# Read Configs #################################################################
+################################################################################
+configs=(
+    "$HOME/.bdm.conf"
+    "$LOCAL_CONFIG_DIR/bdm.conf"
+    "$LOCAL_CONFIG_DIR/bdm/bdm.conf"
+    "$DOTFILES_ROOT/bdm.conf"
+)
+
+found_config=false
+for config in "${configs[@]}"; do
+    [[ -f "$config" ]] && {
+        read_ini --prefix CONF --boolean off "$config"
+        found_config=true
+        break
+    }
+done
+
+$found_config || {
+    error "Cannot find config file"
+    exit 1
+}
 
 # Termux Support ###############################################################
 ################################################################################
@@ -73,132 +81,23 @@ main() {
     shift
 
     local -A install_options=(
-        [checkdeps]=true
-        [installdeps]=false
-        [usermode]=false
-    )
-    local -A list_options=(
-        [rundeps]=false
-        [makedeps]=false
+        [depends]="$CONF__bdm__depends"
+        [usermode]="$CONF__bdm__usermode"
     )
 
     # TODO: add a function to export dependency graph
     case $cmd in
     i*)
         cmd="install"
-        # get options, formalize command
-        while [[ $1 =~ $_OPTION_PATTERN ]]; do
-            case $1 in
-            "-n" | "--no-checkdeps") install_options[checkdeps]=false ;;
-            "-c" | "--checkdeps") install_options[checkdeps]=true ;;
-            "-i" | "--installdeps")
-                install_options[checkdeps]=true
-                install_options[installdeps]=true
-                ;;
-            "-u" | "--user")
-                install_options[usermode]=true
-                export ISROOT=false
-                ;;
-            "-p" | "--prefix")
-                shift
-                export USER_PREFIX=$1
-                [[ -d $USER_PREFIX ]] || {
-                    error "User prefix $USER_PREFIX does not exist. Please create it manually"
-                    return 1
-                }
-                install_options[usermode]=true
-                export ISROOT=false
-                ;;
-            "-j" | "--jobs")
-                shift
-                export JOB_COUNT=$1
-                local re='^[1-9][0-9]*$'
-                [[ $JOB_COUNT =~ $re ]] || {
-                    error "job count must be a positive integer"
-                    return 1
-                }
-                ;;
-            *)
-                error "Option $1 unrecognized"
-                return 1
-                ;;
-            esac
-            shift
-        done
-
-        # require root if not in usermode
-        ${install_options[usermode]} || require_and_hold_root_access || return 1
-        ${install_options[usermode]} && {
-            export PATH="$USER_PREFIX/bin:$PATH"
-        }
-
-        # dotfiles to install
-        local -a dotfiles
-
-        # filter a list of valid dotfiles
-        local valid_dotfiles
-        valid_dotfiles="$(filter_valid_dotfiles "$@")"
-        if [[ -n $valid_dotfiles ]]; then
-            mapfile -t dotfiles <<<"$valid_dotfiles"
-        else
-            warning "No dotfile to install..."
-            return 0
-        fi
-
-        # Parse dependency graph
-        ${install_options[checkdeps]} && {
-            if ${install_options[installdeps]}; then
-                # Check for dependency loop, including makedepends
-                dependency_loop_detection makedepends "${dotfiles[@]}" || {
-                    error "Depencency checking failed"
-                    return 1
-                }
-
-                # add all dependency, including makedepends to 'dotfiles' and correct their order,
-                mapfile -t dotfiles < <(list_and_sort_dependencies makedepends "${dotfiles[@]}")
-            else
-                # Only check for running depends (the `depends` vector)
-                dependency_loop_detection rundepends "${dotfiles[@]}" || {
-                    error "Dependency checking failed"
-                    return 1
-                }
-            fi
-        }
-        echo "dotfiles to check/install: ${dotfiles[*]}"
-        echo -n "Proceed? [Y/n]: "
-        read -r ans
-        [[ $ans == n ]] && return 0
-
-        install_dotfiles
+        read -ra pkgs <<<"$(parse_install_args "$@")"
+        install "${pkgs[@]}"
         return $?
         ;;
     u*)
         cmd="uninstall"
-        # get options, formalize command
-        while [[ $1 =~ $_OPTION_PATTERN ]]; do
-            case $1 in
-            *)
-                error "Option $1 unrecognized"
-                exit 1
-                ;;
-            esac
-            shift
-        done
+        read -ra pkgs <<<"$(parse_uninstall_args "$@")"
+        uninstall "${pkgs[@]}"
 
-        # dotfiles to uninstall
-        local -a dotfiles
-
-        # filter a list of valid dotfiles
-        local valid_dotfiles
-        valid_dotfiles="$(filter_valid_dotfiles "$@")"
-        if [[ -n $valid_dotfiles ]]; then
-            mapfile -t dotfiles <<<"$valid_dotfiles"
-        else
-            warning "No dotfile to uninstall..."
-            return 0
-        fi
-
-        uninstall_dotfiles
         return $?
         ;;
     c*)
@@ -271,6 +170,7 @@ main() {
         ;;
     n*)
         cmd="new" # create a new package
+        # TODO some config for generating template, such as non-root, distro, function, etc
         [[ $cmd == "new" ]] && {
             info "Creating package '$1'"
             mkdir -p "$DOTFILES_ROOT/$1"
@@ -278,7 +178,7 @@ main() {
                 error "$DOTFILES_ROOT/$1/bootstrap.sh exists."
                 return 1
             }
-            echo "$_BOOTSTRAP_TEMPLATE" >"$DOTFILES_ROOT/$1/bootstrap.sh"
+            source "$DOTFILES_ROOT/templates/gen_bootstrap.sh" >"$DOTFILES_ROOT/$1/bootstrap.sh"
             return 0
         }
         ;;
@@ -291,18 +191,132 @@ main() {
     # TODO: add tag support
 }
 
+# TODO: modify this
+parse_install_args() {
+    # get options, formalize command
+    while [[ $1 =~ $_OPTION_PATTERN ]]; do
+        case $1 in
+        "-d" | "--depends")
+            shift
+            install_options[depends]="$1"
+            ;;
+        "-u" | "--usermode")
+            shift
+            install_options[usermode]="$1"
+            ;;
+        *)
+            error "Option $1 unrecognized"
+            return 1
+            ;;
+        esac
+        shift
+    done
+
+    [[ ${install_options[depends]} == 'skip' || \
+    ${install_options[depends]} == 'check' || \
+    ${install_options[depends]} == 'install' ]] || {
+        error "-d | --depends must be followed by one of skip|check|install"
+        return 1
+    }
+
+    [[ ${install_options[usermode]} == 'true' || \
+    ${install_options[usermode]} == 'false' ]] || {
+        error "-u | --usermode must be followed by either 'true' or 'false'"
+        return 1
+    }
+
+    export USERMODE="${install_options[usermode]}"
+    echo "$@"
+}
+
+install() {
+    # require root if not in usermode
+    ${install_options[usermode]} || require_and_hold_root_access || return 1
+
+    # dotfiles to install
+    local -a dotfiles
+
+    # filter a list of valid dotfiles
+    local valid_dotfiles
+    valid_dotfiles="$(filter_valid_dotfiles "$@")"
+    if [[ -n $valid_dotfiles ]]; then
+        mapfile -t dotfiles <<<"$valid_dotfiles"
+    else
+        warning "No dotfile to install..."
+        return 0
+    fi
+
+    # Parse dependency graph
+    if [[ ${install_options[depends]} != 'skip' ]]; then
+        # Check for dependency loop, including makedepends
+        dependency_loop_detection makedepends "${dotfiles[@]}" || {
+            error "Depencency checking failed"
+            return 1
+        }
+
+        if [[ ${install_options[depends]} == 'install' ]]; then
+            # add all dependency to 'dotfiles' and correct their order
+            mapfile -t dotfiles < <(list_and_sort_dependencies makedepends "${dotfiles[@]}")
+        fi
+    fi
+
+    echo "dotfiles to check/install: ${dotfiles[*]}"
+    echo -n "Proceed? [Y/n]: "
+    read -r ans
+    [[ $ans == n ]] && return 0
+
+    install_dotfiles
+    return $?
+}
+
+parse_uninstall_args() {
+    # get options, formalize command
+    while [[ $1 =~ $_OPTION_PATTERN ]]; do
+        case $1 in
+        *)
+            error "Option $1 unrecognized"
+            exit 1
+            ;;
+        esac
+        shift
+    done
+    echo "$@"
+}
+
+uninstall() {
+    # dotfiles to uninstall
+    local -a dotfiles
+
+    # filter a list of valid dotfiles
+    local valid_dotfiles
+    valid_dotfiles="$(filter_valid_dotfiles "$@")"
+    if [[ -n $valid_dotfiles ]]; then
+        mapfile -t dotfiles <<<"$valid_dotfiles"
+    else
+        warning "No dotfile to uninstall..."
+        return 0
+    fi
+
+    uninstall_dotfiles
+}
+
 # $@: list of dotfiles. 'all' for every valid dotfiles
 # print: list of valid dotfiles
 filter_valid_dotfiles() {
     local -a dotfiles=("$@")
-    [[ $1 == 'all' ]] && mapfile -t dotfiles < <(ls "$DOTFILES_ROOT")
+    [[ $1 == 'all' ]] && {
+        dotfiles=()
+        read -ra dotfile_dirs <<<"${CONF__bdm__dotfile_dirs:-dotfiles}"
+        for dir in "${dotfile_dirs[@]}"; do
+            mapfile -t list < <(ls "$DOTFILES_ROOT/$dir")
+            dotfiles+=("${list[@]}")
+        done
+    }
 
     # filter out invalid dotfiles
     local -a valid_dotfiles
     for dotfile in "${dotfiles[@]}"; do
-        if [ -f "$DOTFILES_ROOT/$dotfile/bootstrap.sh" ]; then
-            valid_dotfiles+=("$dotfile")
-        fi
+        find_dotfile_dir "$dotfile" >/dev/null && valid_dotfiles+=("$dotfile")
     done
 
     # return
@@ -465,14 +479,8 @@ dependency_loop_detection() {
     return 0
 }
 
-# $1: <rundepends|makedepends>, decide which type of dependency to include.
-#     Note that makedepends implies rundepends
-# ${@:1} all dotfiles to install
+# $@: all dotfiles to install
 list_and_sort_dependencies() {
-    local add_makedepends=false
-    [[ $1 == makedepends ]] && add_makedepends=true
-    shift
-
     local -a exam_queue
     for dotfile in "$@"; do
         exam_queue+=("$dotfile")
@@ -485,14 +493,6 @@ list_and_sort_dependencies() {
         local cur_dotfile="${exam_queue[$i]}"
         local -a depends
         mapfile -t depends < <(extract_dotfile_depends rundepends "$cur_dotfile")
-
-        # add makedepends in front of rundepends, if required
-        if $add_makedepends; then
-            local -a makedepends
-            mapfile -t makedepends < <(extract_dotfile_depends makedepends "$cur_dotfile")
-            depends=("${makedepends[@]}" "${depends[@]}")
-        fi
-
         if [[ ${#depends[@]} -ne 0 ]]; then
             exam_queue+=("${depends[@]}")
         fi
@@ -508,202 +508,54 @@ list_and_sort_dependencies() {
 }
 
 # Extract `d*:` types dependencies from dotfiles' bootstrap file
-# $1: <rundepends|makedepends>, decide which type of dependency to include.
-# $2: name of the dotfile
+# $1: name of the dotfile
 extract_dotfile_depends() {
-    if [[ $1 == makedepends ]]; then
-        (
-            set -eo pipefail
-            # avoid variable contamination of parent shell
-            unset makedepends
-            source "$DOTFILES_ROOT/$2/bootstrap.sh" >/dev/null 2>&1
-            for depend in "${makedepends[@]}"; do
-                read -r dep_type dep_name <<<"$(dependency_type_and_name "$depend")"
-                if [[ $dep_type == dotfile ]]; then
-                    echo "$dep_name"
-                fi
-            done
-        )
-    elif [[ $1 == rundepends ]]; then
-        (
-            set -eo pipefail
-            # avoid variable contamination of parent shell
-            unset depends
-            source "$DOTFILES_ROOT/$2/bootstrap.sh" >/dev/null 2>&1
-            for depend in "${depends[@]}"; do
-                read -r dep_type dep_name <<<"$(dependency_type_and_name "$depend")"
-                if [[ $dep_type == dotfile ]]; then
-                    echo "$dep_name"
-                fi
-            done
-        )
-    else
-        error "extract_dotfile_depends: Unrecognized option $1"
-        exit 1
-    fi
+    (
+        set -eo pipefail
+        # avoid variable contamination of parent shell
+        unset depends
+        source "$DOTFILES_ROOT/$1/bootstrap.sh" >/dev/null 2>&1
+        for depend in "${depends[@]}"; do
+            read -r dep_type dep_name <<<"$(dependency_type_and_name "$depend")"
+            if [[ $dep_type == dotfile ]]; then
+                echo "$dep_name"
+            fi
+        done
+    )
+    error "extract_dotfile_depends: Unrecognized option $1"
+    exit 1
 }
 
 # require: 'install_options' map set
 # require: 'dotfiles' array set
 install_dotfiles() {
     # Three steps to install all the dotfiles. the first two steps are skipped
-    # if 'install_options[checkdeps]' is false
+    # if 'install_options[depends]' is skip
 
     for dotfile in "${dotfiles[@]}"; do
         info "Processing $dotfile ..."
-        ${install_options[checkdeps]} && {
-            # 1. check if all dependencies in the 'depends' array, if dependency is not
-            # met, check if there's a entry in the 'packages' array to install it
+
+        # 1. check for misisng dependencies
+        if [[ ${install_options[depends]} != 'skip' ]]; then
+            # 1. check if all dependencies in the 'check' array,
+            # if dependency is not met, check if there's a entry in the
+            # 'packages' array to install it
             local -a missing_deps=()
-
-            local missing_deps_list=""
-            missing_deps_list=$(
-                # run in subshell. exit when any error happens
-                set -eo pipefail
-
-                # Do not redirect stderror to allow error reporting in dotfile scripts
-                # shellcheck source=./vim/bootstrap.sh
-                source "$DOTFILES_ROOT/$dotfile/bootstrap.sh" >/dev/null
-
-                # these variables are defined in subshell and does not interfere with the variables outside
-                declare -a missing_deps_install=()
-                declare -a missing_deps_check=()
-
-                # Check dependency files before installing
-                for item in "${depends[@]}"; do
-                    read -r dep_type dep_name <<<"$(dependency_type_and_name "${item}")"
-                    if [[ $dep_type == 'file' ]]; then
-                        # item is a file
-                        [[ -e $dep_name ]] || {
-                            missing_deps_check+=("${item}")
-                            missing_deps_install+=("${item}")
-                        }
-                    elif [[ $dep_type == 'virtual' ]]; then
-                        # item is virtual, skip checking, but list as install
-                        missing_deps_install+=("${item}")
-                    elif [[ $dep_type == 'function' ]]; then
-                        # Use a function to judge if item exists
-                        set +e
-                        (
-                            set -e
-                            ${item#fu*:}
-                        )
-                        [[ $? == 0 ]] || {
-                            missing_deps_check+=("${item}")
-                            missing_deps_install+=("${item}")
-                        }
-                        set -e
-                    elif [[ $dep_type == 'executable' ]]; then
-                        command -v "$dep_name" >/dev/null 2>&1 || {
-                            missing_deps_check+=("${item}")
-                            missing_deps_install+=("${item}")
-                        }
-                    elif [[ $dep_type == 'dotfile' ]]; then
-                        # item is a dotfile
-                        # Check for invalid key in 'packages' array
-                        [[ -z ${packages[$item]} ]] ||
-                            warning "$dotfile: [$item]=${packages[$item]} in the" \
-                                "'packages' array is ignored. Please consider" \
-                                "removing it."
-                        # Skip. dotfile dependency is already handled before this checking step.
-                    elif [[ $dep_type == 'unknown' ]]; then
-                        error "$dotfile: unrecognized dependency prefix in '${item}'"
-                        return 1
-                    fi
-                done
-
-                if [[ ${#missing_deps_check[@]} -gt 0 ]]; then
-                    warning "$dotfile: Dependency missing: ${missing_deps_check[*]}" >&2
-                fi
-                unset missing_deps_check
-
-                declare unable_to_meet_dependency=false
-                declare pkg
-                for dep in "${missing_deps_install[@]}"; do
-                    # pass to outer shell
-                    echo "$dep"
-                    # check if this dependency can be meet
-                    pkg="${packages["$dep"]}"
-                    if [[ -z $pkg ]]; then
-                        error "$dotfile: Cannot meet dependency '$dep': It's neither installed nor defined in the 'packages' map."
-                        unable_to_meet_dependency=true
-                    elif ! [[ $pkg =~ f[[:alnum:]]*:[[:print:]]+ ]] && ! $ISROOT; then
-                        # installed package through system package manager
-                        error "Cannot install package ${pkg#s*} with package manager without root access"
-                        unable_to_meet_dependency=true
-                        return 1
-                    fi
-                done
-
-                if $unable_to_meet_dependency; then
-                    return 1
-                fi
-                exit 0
-            )
-            # We can't use `(set -e;cmd1;cmd2;...;) || warning ...` or if-else here.
-            # see https://stackoverflow.com/questions/29532904/bash-subshell-errexit-semantics
-            [[ $? == 0 ]] || {
+            mapfile -t missing_deps <<<"$(check_depends "$dotfile")" || {
                 error "Unable to meet dependency(s), aborting... "
                 return 1
             }
+        fi
 
-            # note that '<<<' always create a '\n' terminated string
-            [[ -n $missing_deps_list ]] &&
-                mapfile -t missing_deps <<<"$missing_deps_list"
-
-            ${install_options[installdeps]} && {
-                # 2. install all the missing dependencies
-                (
-                    set -eo pipefail
-                    # shellcheck source=./vim/bootstrap.sh
-                    source "$DOTFILES_ROOT/$dotfile/bootstrap.sh" >/dev/null 2>&1
-
-                    for dep in "${missing_deps[@]}"; do
-                        declare pkg="${packages["$dep"]}"
-                        if [[ $pkg =~ f[[:alnum:]]*:[[:print:]]+ ]]; then
-
-                            # package should be installed through function, in a subshell,
-                            # so that set -e works correctly (both "exceptions" and returned error code are captured)
-                            # We have to use this crooked way to simulate try-catch ...
-                            # As above, see https://stackoverflow.com/questions/29532904/bash-subshell-errexit-semantics
-                            set +e
-                            (
-                                set -e
-                                ${pkg#f*:}
-                            )
-                            [[ $? == 0 ]] || {
-                                error "$dotfile: Failed executing function ${pkg#f*:}."
-                                return 1
-                            }
-                            set -e
-                        else
-                            # package should be installed through package manager.
-                            install_pkg_command="install_system_package_${DISTRO} ${pkg#s*:}"
-                            set +e
-                            (
-                                set -e
-                                $install_pkg_command
-                            )
-                            [[ $? == 0 ]] || {
-                                error "$dotfile: Failed installing system package ${pkg#s*:} (for dependency $dep)."
-                                return 1
-                            }
-                            set -e
-                        fi
-                    done
-                )
-                [[ $? == 0 ]] || {
-                    error "Dependency installation failed, aborting... "
-                    return 1
-                }
-            }
-        }
+        # 2. install misisng dependencies
+        if [[ ${install_options[depends]} == 'install' ]]; then
+            install_depends "$dotfile" "${missing_deps[@]}"
+        fi
 
         # 3. install dotfiles
         (
             set -eo pipefail
             # shellcheck source=./vim/bootstrap.sh
-            source "$DOTFILES_ROOT/$dotfile/bootstrap.sh" >/dev/null
 
             if [[ $(type -t "install") == "function" ]]; then
                 install >/dev/null
@@ -716,11 +568,12 @@ install_dotfiles() {
             return 1
         }
 
+        # 4. evaluate post-install function
         local post_install_func
         post_install_func="$(
             set -eo pipefail
-            # shellcheck source=./vim/bootstrap.sh
-            source "$DOTFILES_ROOT/$dotfile/bootstrap.sh" >/dev/null
+            bootstrap_path="$(find_bootstrap_sh "$dotfile")" || return 1
+            source "$bootstrap_path" >/dev/null
 
             if [[ $(type -t "post_install") == "function" ]]; then
                 type post_install
@@ -736,13 +589,166 @@ install_dotfiles() {
             eval "${post_install_func}"
 
             post_install || {
-                error "$dotfile: Failed evaluating the post_install function. Aborting to avoid subsequent failures..."
+                error "$dotfile: Failed executing the post_install function. " \
+                    "Aborting to avoid subsequent failures..."
                 return 1
             }
 
             unset post_install
         }
     done
+}
+
+# $1 dotfile dir name
+# ${install_options[depends]} affects the behavior of this function
+# echo: a list of missing depends, one per line
+# return: 0 for success, 1 for fail
+check_depends() {
+    (
+        # run in subshell. exit when any error happens
+        set -eo pipefail
+
+        unset tags
+        declare -a dep_check=()
+        declare -A dep_install=()
+
+        # Do not redirect stderror to allow error reporting
+        # shellcheck source=./vim/bootstrap.sh
+        bootstrap_path="$(find_bootstrap_sh "$1")" || return 1
+        source "$bootstrap_path" >/dev/null
+
+        # these variables are defined in subshell and
+        # does not interfere with the variables outside
+        declare -a missing_deps=()
+
+        # Check dependency files before installing
+        for item in "${dep_check[@]}"; do
+            read -r dep_type dep_name <<<"$(dependency_type_and_name "${item}")"
+            if [[ $dep_type == 'file' ]]; then
+                # item is a file
+                if [[ ! -e $dep_name ]]; then
+                    missing_deps+=("${item}")
+                fi
+            elif [[ $dep_type == 'virtual' ]]; then
+                # item is virtual, skip checking, but list as install
+                if [[ ${install_options[depends]} == 'install' ]]; then
+                    missing_deps+=("${item}")
+                fi
+            elif [[ $dep_type == 'function' ]]; then
+                # Use a function to judge if item exists
+                set +e
+                (
+                    set -e
+                    ${item#fu*:}
+                )
+                if [[ $? != 0 ]]; then
+                    missing_deps+=("${item}")
+                fi
+                set -e
+            elif [[ $dep_type == 'executable' ]]; then
+                if ! command -v "$dep_name" >/dev/null 2>&1; then
+                    missing_deps+=("${item}")
+                fi
+            elif [[ $dep_type == 'dotfile' ]]; then
+                # item is a dotfile
+                # Check for invalid key in 'packages' array
+                if [[ -n ${dep_install[$item]} ]]; then
+                    warning "$dotfile: [$item]=${dep_install[$item]} in the" \
+                        "'install' array is ignored. Please consider" \
+                        "removing it."
+                fi
+                # Skip. dotfile dependency is already handled before checking.
+            elif [[ $dep_type == 'unknown' ]]; then
+                error "$dotfile: unrecognized dependency prefix in '${item}'"
+                return 1
+            fi
+        done
+
+        if [[ ${#missing_deps[@]} -gt 0 ]]; then
+            warning "$dotfile: Dependency missing: ${missing_deps[*]}" >&2
+        fi
+
+        declare able_to_meet_dependency=true
+        local pkg
+        for dep in "${missing_deps[@]}"; do
+
+            # pass to outer shell
+            echo "$dep"
+
+            # check if this dependency can be meet
+            pkg="${dep_install["$dep"]}"
+            if [[ -z $pkg ]]; then
+                error "$dotfile: Cannot meet dependency '$dep': It's neither " \
+                    "installed nor defined in the 'dep_install' map."
+                able_to_meet_dependency=false
+            fi
+        done
+
+        $able_to_meet_dependency
+    )
+}
+
+# $1: dotfile dir name
+# ${@:1}: a list of missing deps in the dep_check array
+# return: 0 for success, 1 for fail
+install_depends() {
+    local dotfile=$1
+    shift
+    local -a missing_deps=("$@")
+    # 2. install all the missing dependencies
+    (
+        set -eo pipefail
+
+        # shellcheck source=./vim/bootstrap.sh
+        bootstrap_path="$(find_bootstrap_sh "$dotfile")" || return 1
+        source "$bootstrap_path" >/dev/null 2>&1
+
+        for dep in "${missing_deps[@]}"; do
+            declare pkg="${dep_install["$dep"]}"
+            if [[ $pkg =~ f[[:alnum:]]*:[[:print:]]+ ]]; then
+
+                # package should be installed through function, in a subshell,
+                # so that set -e works correctly (both "exceptions" and returned
+                # error code are captured)
+                # We have to use this crooked way to simulate try-catch ...
+                # see https://stackoverflow.com/questions/29532904/bash-subshell-errexit-semantics
+                set +e
+                (
+                    set -e
+                    ${pkg#f*:}
+                )
+                [[ $? == 0 ]] || {
+                    error "$dotfile: Failed executing function ${pkg#f*:}."
+                    return 1
+                }
+                set -e
+            else
+                # package should be installed through package manager.
+                if $USERMODE; then
+                    install_pkg_command="install_userland_package_pkgsrc ${pkg#s*:}"
+                else
+                    install_pkg_command="install_system_package_${DISTRO} ${pkg#s*:}"
+                fi
+
+                set +e
+                (
+                    set -e
+                    $install_pkg_command
+                )
+
+                [[ $? == 0 ]] || {
+                    error "$dotfile: Failed installing package ${pkg#s*:} " \
+                        "(for dependency $dep)."
+                    return 1
+                }
+                set -e
+            fi
+        done
+    )
+    [[ $? == 0 ]] || {
+        error "Dependency installation failed, aborting... "
+        return 1
+    }
 }
 
 uninstall_dotfiles() {
@@ -766,6 +772,32 @@ uninstall_dotfiles() {
             return 1
         }
     done
+}
+
+# $1: name of the dotfile
+# print: absolute path to the dotfile dir
+# return: 1 if not found
+find_dotfile_dir() {
+    read -ra dotfile_dirs <<<"${CONF__bdm__dotfile_dirs:-dotfiles}"
+    for dir in "${dotfile_dirs[@]}"; do
+        if [[ -d "$DOTFILES_ROOT/$dir/$1" && -f \
+            "$DOTFILES_ROOT/$dir/$1/bootstrap.sh" ]]; then
+            echo "$DOTFILES_ROOT/$dir/$1"
+            return 0
+        fi
+    done
+    return 1
+}
+
+find_bootstrap_sh() {
+    # $1: name of the dotfile
+    # print: absolute path to the dotfile dir
+    # return: 1 if not found
+    dir=$(find_dotfile_dir "$1") || {
+        error "Cannot find bootstrap.sh for $1"
+        return 1
+    }
+    echo "$dir/bootstrap.sh"
 }
 
 _HELP_MESSAGE="\
@@ -838,10 +870,10 @@ _BOOTSTRAP_TEMPLATE="\
 "'#!/usr/bin/env bash
 # shellcheck disable=SC1090
 
-source "$DOTFILES_ROOT/.lib/utils.sh"
-source "$DOTFILES_ROOT/.lib/distro.sh"
-source "$DOTFILES_ROOT/.lib/symlink.sh"
-source "$DOTFILES_ROOT/.lib/transaction.sh"
+source "$DOTFILES_ROOT/lib/utils.sh"
+source "$DOTFILES_ROOT/lib/distro.sh"
+source "$DOTFILES_ROOT/lib/symlink.sh"
+source "$DOTFILES_ROOT/lib/transaction.sh"
 
 THISDIR=$(
     cd "$(dirname "${BASH_SOURCE[0]}")" || exit
