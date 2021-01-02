@@ -42,6 +42,9 @@
 # WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
 # OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
 # IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#
+# (adapted from https://github.com/rudimeier/bash_ini_parser)
+
 
 function read_ini() {
     # Be strict with the prefix, since it's going to be run through eval
@@ -81,25 +84,10 @@ function read_ini() {
     local INI_FILE=""
     local INI_SECTION=""
 
-    # {{{ START Deal with command line args
-
     # Set defaults
     local BOOLEANS=1
     local VARNAME_PREFIX=INI
     local CLEAN_ENV=0
-
-    # {{{ START Options
-
-    # Available options:
-    #	--boolean		Whether to recognise special boolean values: ie for 'yes', 'true'
-    #					and 'on' return 1; for 'no', 'false' and 'off' return 0. Quoted
-    #					values will be left as strings
-    #					Default: on
-    #
-    #	--prefix=STRING	String to begin all returned variables with (followed by '__').
-    #					Default: INI
-    #
-    #	First non-option arg is filename, second is section name
 
     while [ $# -gt 0 ]; do
 
@@ -170,10 +158,6 @@ function read_ini() {
     if [ "$BOOLEANS" != "0" ]; then
         BOOLEANS=1
     fi
-
-    # }}} END Options
-
-    # }}} END Deal with command line args
 
     local LINE_NUM=0
     local SECTIONS_NUM=0

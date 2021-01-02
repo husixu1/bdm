@@ -51,10 +51,8 @@ distro() {
 check_system_package_arch() { pacman -Q "$1" >/dev/null 2>&1; }
 check_system_package_debian() { dpkg -s "$1" >/dev/null 2>&1; }
 
-install_system_package_arch() {
-    # TODO: (maybe) we need "yes" to every question, instead of the default one (--noconfirm)
-    sudo pacman -S --noconfirm --needed "$@"
-}
+# TODO: (maybe) we need "yes" to every question, instead of the default one (--noconfirm)
+install_system_package_arch() { sudo pacman -S --noconfirm --needed "$@"; }
 install_system_package_debian_7() { sudo apt-get install --yes "$@"; }
 install_system_package_debian_8() { sudo apt-get install --yes "$@"; }
 install_system_package_debian_9() { sudo apt-get install --yes "$@"; }
@@ -63,11 +61,29 @@ install_system_package_debian_11() { sudo apt-get install --yes "$@"; }
 install_system_package_termux() { apt install --yes "$@"; }
 install_system_package_linux() { error "General linux package not supported"; }
 
+install_aur_package() {
+    local err="AUR helper command not specified in config file."
+    local exe
+    read -r exe _ <<<"${CONF__bdm__aur_helper_cmd:?$err}"
+    if ! command -v "$exe" >/dev/null 2>&1; then
+        error "Cannot find '$exe' in \$PATH."
+        return 1
+    fi
+    local cmd="${CONF__bdm__aur_helper_cmd:?$err} $*"
+    $cmd
+}
+
 install_userland_package_pkgsrc() {
+    if [[ ! -e "${CONF__pkgsrc__prefix:?}/bin/bmake" ]]; then
+        error "command 'bmake' not found. \n" \
+            "Pleae check the installation of pkgsrc, and make sure \n" \
+            "the [pkgsrc] section in the config file is correctly configured."
+        return 1
+    fi
     for pkg in "$@"; do
         pushd "${CONF__pkgsrc__src_root:?}/$pkg" || {
             error "Failed to find pkgsrc package: $pkg"
-            continue
+            return 1
         }
         "${CONF__pkgsrc__prefix:?}/bin/bmake" install &&
             "${CONF__pkgsrc__prefix:?}/bin/bmake" package

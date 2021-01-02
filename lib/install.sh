@@ -94,7 +94,7 @@ __install_handle_old_record() {
     src="$(realpath "$3")"
     tgt="$(realpath -ms "$4")"
 
-    if ! [[ -f $src ]]; then
+    if ! [[ -e $src ]]; then
         error "$src does not exist"
         return 1
     fi
@@ -191,8 +191,9 @@ installSymLink() {
     src="$(realpath "$2")"
     tgt="$(realpath -ms "$3")"
 
-    __install_handle_old_record "$1" "symlink" "$2" "$3" "$4"
-    if [[ $? != 2 ]]; then return $?; fi
+    # must use || here (in set -e mode), since 'if' will eat the return value
+    __install_handle_old_record "$1" "symlink" "$2" "$3" "$4" || ret=$?
+    if [[ $ret != 2 ]]; then return $ret; fi
 
     # Install target and add record to db.
     # For symlink, we do not care about file hash.
@@ -217,8 +218,8 @@ installFile() {
     src="$(realpath "$2")"
     tgt="$(realpath -ms "$3")"
 
-    __install_handle_old_record "$1" "file" "$2" "$3" "$4"
-    if [[ $? != 2 ]]; then return $?; fi
+    __install_handle_old_record "$1" "file" "$2" "$3" "$4" || ret=$?
+    if [[ $ret != 2 ]]; then return $ret; fi
 
     # Install target and add record to db.
     # For symlink, we do not care about file hash.
@@ -279,7 +280,7 @@ __remove_handle_old_record() {
     install_type="$2"
     src="$(realpath "$3")"
     tgt="$(realpath -ms "$4")"
-    if ! [[ -f $src ]]; then
+    if ! [[ -e $src ]]; then
         error "$src does not exist"
         return 1
     fi

@@ -23,3 +23,7 @@ warning() {
 info() {
     echo "[1m[92mINF:[0m $*" >&1
 }
+
+debug() {
+    echo "[1m[94mDBG:[0m $*" >&2
+}
