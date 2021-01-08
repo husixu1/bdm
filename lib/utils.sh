@@ -12,18 +12,42 @@
 #     return $result
 # }
 
+# $1: prefix
+# ${@:1} messages
+__print(){
+    local prefix="$1"
+    shift
+    local indent=""
+    if [[ ${LOG_INDENT:-x} =~ ^[[:digit:]]+$ ]]; then
+        for _ in $(seq "$LOG_INDENT"); do
+            indent+=" "
+        done
+    fi
+
+    echo -n "${indent}${prefix} " >&2
+    echo "$1"
+    shift
+    indent+="    "
+
+    for line in "$@"; do
+        echo "${indent}${line}"
+    done
+}
+
+# env $INDENT: indent width
+# $@: message, printed one per line
 error() {
-    echo "[1m[91mERR:[0m $*" >&2
+    __print "[1m[91mERR:[0m" "$@" >&2
 }
 
 warning() {
-    echo "[1m[93mWRN:[0m $*" >&2
+    __print "[1m[93mWRN:[0m" "$@" >&2
 }
 
 info() {
-    echo "[1m[92mINF:[0m $*" >&1
+    __print "[1m[92mINF:[0m" "$@" >&1
 }
 
 debug() {
-    echo "[1m[94mDBG:[0m $*" >&2
+    __print "[1m[94mDBG:[0m" "$@" >&2
 }

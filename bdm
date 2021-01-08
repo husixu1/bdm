@@ -280,10 +280,10 @@ do_install() {
             bootstrap_path="$(find_bootstrap_sh "$dotfile")" || return $?
             source "$bootstrap_path" >/dev/null
 
-            if [[ $(type -t "install") == "function" ]]; then
-                install
+            if [[ $(type -t "__install") == "function" ]]; then
+                __install
             else
-                warning "'install()' not defined in '$bootstrap_path', skipping."
+                warning "'__install()' not defined in '$bootstrap_path', skipping."
             fi
         )
         [[ $? == 0 ]] || {
@@ -295,6 +295,7 @@ do_install() {
         local post_install_func
         post_install_func="$(
             set -eo pipefail
+            export LOG_INDENT=4
             bootstrap_path="$(find_bootstrap_sh "$dotfile")" || return 1
             source "$bootstrap_path" >/dev/null
 
