@@ -351,7 +351,26 @@ do_uninstall() {
         return 0
     fi
 
-    uninstall_dotfiles
+    for dotfile in "${dotfiles[@]}"; do
+        info "Processing $dotfile ..."
+
+        # uninstall dotfiles
+        (
+            set -eo pipefail
+            bootstrap_path="$(find_bootstrap_sh "$dotfile")" || return $?
+            source "$bootstrap_path" >/dev/null
+
+            if [[ $(type -t "__uninstall") == "function" ]]; then
+                __uninstall >/dev/null
+            else
+                warning "'__uninstall()' not defined in '$dotfile/bootstrap.sh', skipping."
+            fi
+        )
+        [[ $? == 0 ]] || {
+            warning "Failed uninstalling $dotfile"
+            return 1
+        }
+    done
 }
 
 # $@: list of dotfiles. 'all' for every valid dotfiles
@@ -466,6 +485,8 @@ parse_dep_info() {
         install_type="_"
         install_name="_"
     elif [[ -z $dep_install ]]; then
+        # if item after `::` is not specified, treat as if it's a system
+        # package with the same name of the executable
         install_type="system"
         install_name="${dep_check#*:}"
     else
@@ -754,28 +775,7 @@ install_depends() {
     )
 }
 
-uninstall_dotfiles() {
-    for dotfile in "${dotfiles[@]}"; do
-        info "Processing $dotfile ..."
 
-        # uninstall dotfiles
-        (
-            set -eo pipefail
-            # shellcheck source=./dotfiles/vim/bootstrap.sh
-            source "$BDM_ROOT/$dotfile/bootstrap.sh" >/dev/null
-
-            if [[ $(type -t "uninstall") == "function" ]]; then
-                uninstall >/dev/null
-            else
-                warning "'uninstall()' not defined in '$dotfile/bootstrap.sh', skipping."
-            fi
-        )
-        [[ $? == 0 ]] || {
-            warning "Failed uninstalling $dotfile"
-            return 1
-        }
-    done
-}
 
 do_new() {
     [[ -z $1 ]] && {

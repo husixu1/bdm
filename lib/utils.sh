@@ -24,7 +24,7 @@ __print(){
         done
     fi
 
-    echo -n "${indent}${prefix} " >&2
+    echo -n "${indent}${prefix} "
     echo "$1"
     shift
     indent+="    "
