@@ -15,8 +15,6 @@ source "$(dirname "${BASH_SOURCE[0]}")"/utils.sh
 # remove the entries left in "$1/.DINFO" file and move ".DINFO.TMP" to
 # ".DINFO" (see bootstrap_imports.sh)
 
-# TODO: test everything blow
-
 # $1: dotfile directory
 transaction_start() {
     if [[ -f "$1/.DINFO.TMP" ]]; then
@@ -73,10 +71,16 @@ install_link_or_file() {
         }
     fi
 
+    # skip if already installed as new target
+    new_records="$(__find_records "$1/.DINFO.TMP" "source" "$src" "target" "$tgt")"
+    if [[ -n "$new_records" ]]; then
+        error "$src --> $tgt can only be installed once in a transaction."
+        return 1
+    fi
+
+    # if old record with same source and target exists, update the old target
     old_records="$(__find_records "$1/.DINFO" "source" "$src" "target" "$tgt")"
     if [[ -n "$old_records" ]]; then
-        # if old record with same source and target exists,
-        # try update the old target if installation config is different
         mapfile -t records <<<"$old_records"
         local i=0
         local remove_old_target=false
@@ -88,8 +92,6 @@ install_link_or_file() {
             local old_tgt="${record[${__entry_offset["target"]}]}"
             local old_hash="${record[${__entry_offset["hash"]}]}"
             local old_uid="${record[${__entry_offset["uid"]}]}"
-            local old_gid="${record[${__entry_offset["gid"]}]}"
-            local old_perm="${record[${__entry_offset["permission"]}]}"
 
             if [[ ("$old_hash" == "symlink" && -L "$old_tgt" && \
                 $old_tgt -ef $src) || (\
@@ -198,8 +200,6 @@ install_directory() {
             local old_id="${record[${__entry_offset["id"]}]}"
             local old_tgt="${record[${__entry_offset["target"]}]}"
             local old_uid="${record[${__entry_offset["uid"]}]}"
-            local old_gid="${record[${__entry_offset["gid"]}]}"
-            local old_perm="${record[${__entry_offset["perm"]}]}"
 
             if [[ -d $old_tgt ]]; then
                 info "removing old target $old_tgt"
@@ -227,10 +227,8 @@ install_directory() {
         fi
     fi
 
-    if [[ "$uid" == "$(id -u root)" ]]; then
-        sudo mkdir -p "$tgt"
-    elif [[ "$uid" == "$(id -u)" ]]; then
-        mkdir -p "$tgt"
+    if [[ "$uid" == "$(id -u)" ]]; then
+        install -m "$perm" -o "$uid" -g "$gid" -d "$tgt"
     else
         sudo install -m "$perm" -o "$uid" -g "$gid" -d "$tgt"
     fi
@@ -289,8 +287,6 @@ remove_link_or_file() {
             local old_tgt="${record[${__entry_offset["target"]}]}"
             local old_hash="${record[${__entry_offset["hash"]}]}"
             local old_uid="${record[${__entry_offset["uid"]}]}"
-            local old_gid="${record[${__entry_offset["gid"]}]}"
-            local old_perm="${record[${__entry_offset["perm"]}]}"
 
             if [[ ("$install_type" == "symlink" && -L $old_tgt && $old_tgt -ef $src) || (\
                 "$install_type" == "file" && -f $old_tgt && \
@@ -330,6 +326,7 @@ remove_directory() {
     tgt="$(realpath -ms "$2")"
     raw_records="$(__find_records "$1/.DINFO" "target" "$tgt" "hash" "directory")"
 
+    local do_rmdir=true
     if [[ -n "$raw_records" ]]; then
         local records
         mapfile -t records <<<"$raw_records"
@@ -347,17 +344,25 @@ remove_directory() {
             else
                 warning "$old_tgt missing, removing record ..."
                 __remove_record "$1/.DINFO" "$old_id"
+                do_rmdir=false
             fi
             ((++i))
         done
     else
-        warning "$tgt is installed but not recorded, uninstalling anyway..."
+        if [[ -d "$tgt" ]]; then
+            warning "$tgt is installed but not recorded, uninstalling anyway..."
+        else
+            warning "$tgt does not exist"
+            do_rmdir=false
+        fi
     fi
 
-    if [[ "$4" == "asroot" ]]; then
-        sudo rmdir --ignore-fail-on-non-empty -p "$tgt"
-    else
-        rmdir --ignore-fail-on-non-empty -p "$tgt"
+    if $do_rmdir; then
+        if [[ "$4" == "asroot" ]]; then
+            sudo rmdir --ignore-fail-on-non-empty -p "$tgt"
+        else
+            rmdir --ignore-fail-on-non-empty -p "$tgt"
+        fi
     fi
     info "${2/%\//}/ removed"
 }
@@ -423,8 +428,6 @@ clean() {
         ((++record_idx))
     done
 }
-
-# TODO: update everything blow
 
 # remove all entires in .DINFO ifle, remove associated targets
 # $1: dotfile directory
@@ -616,4 +619,3 @@ __hash_file() {
     read -r md5 _ <<<"$(md5sum "$1")"
     echo "${md5[0]}"
 }
-
