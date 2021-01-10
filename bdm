@@ -17,7 +17,6 @@ fi
     exit 1
 }
 
-# TODO: rename to BDM_ROOT, replace all files
 BDM_ROOT=$(
     cd "$(dirname "${BASH_SOURCE[0]}")" || exit
     pwd
@@ -32,14 +31,14 @@ source "$BDM_ROOT/lib/read_ini.sh"
 
 # Read Configs #################################################################
 ################################################################################
-configs=(
+readonly configs=(
     "$HOME/.bdm.conf"
     "$LOCAL_CONFIG_DIR/bdm.conf"
     "$LOCAL_CONFIG_DIR/bdm/bdm.conf"
     "$BDM_ROOT/bdm.conf"
 )
 
-found_config=false
+declare found_config=false
 for config in "${configs[@]}"; do
     [[ -f "$config" ]] && {
         read_ini --prefix CONF --booleans 0 "$config"
@@ -47,14 +46,18 @@ for config in "${configs[@]}"; do
         break
     }
 done
+unset found_config
 $found_config || {
     error "Cannot find config file"
     exit 1
 }
-unset found_config
 
+# global variables
 declare -a dotfile_dirs
 read -ra dotfile_dirs <<<"${CONF__bdm__dotfile_dirs:-dotfiles}"
+declare cache_dir="${CONF__bdm__cache_dir:-$HOME/.cache/bdm}"
+cache_dir="${cache_dir/#\~/$HOME}"
+mkdir -p "$cache_dir" || return 1
 
 # Termux Support ###############################################################
 ################################################################################
@@ -76,6 +79,8 @@ main() {
         echo "$_HELP_MESSAGE"
         return 0
     }
+
+    update_cache
 
     # Parse command line #######################################################
     ############################################################################
@@ -364,29 +369,39 @@ do_uninstall() {
     done
 }
 
-# TODO: add tag support
-# $@: list of dotfiles. 'all' for every valid dotfiles
-# print: list of valid dotfiles
+# $@: list of dotfiles or tags. 'all' or 't:all' for every valid dotfiles
+# print: list of valid dotfiles, one per line
 filter_valid_dotfiles() {
-    local -a dotfiles=("$@")
-    [[ $1 == 'all' ]] && {
-        dotfiles=()
+    local -a items=("$@")
+    [[ $# -eq 1 && ($1 == "all" || $1 == "t:all") ]] && {
+        items=()
         for dir in "${dotfile_dirs[@]}"; do
             mapfile -t list < <(ls "$BDM_ROOT/$dir")
-            dotfiles+=("${list[@]}")
+            items+=("${list[@]}")
         done
     }
 
-    # filter out invalid dotfiles
-    local -a valid_dotfiles
-    for dotfile in "${dotfiles[@]}"; do
-        find_dotfile_dir "$dotfile" >/dev/null && valid_dotfiles+=("$dotfile")
+    # filter out invalid dotfiles and tags
+    local -a valid_dotfiles=()
+    local -a tags=()
+    for item in "${items[@]}"; do
+        if [[ "$item" =~ ^t: ]]; then
+            tags+=("${item#t:}")
+        else
+            if find_dotfile_dir "$item" >/dev/null; then
+                valid_dotfiles+=("$item")
+            else
+                tags+=("$item")
+            fi
+        fi
     done
 
+    local -a extra_dotfiles=()
+    mapfile -t extra_dotfiles <<<"$(tags_to_dotfiles "${tags[@]}")"
+    [[ -n "${extra_dotfiles[*]}" ]] && valid_dotfiles+=("${extra_dotfiles[@]}")
+
     # return
-    for dotfile in "${valid_dotfiles[@]}"; do
-        echo "$dotfile"
-    done
+    printf "%s\n" "${valid_dotfiles[@]}" | sort -u
 }
 
 require_and_hold_root_access() {
@@ -839,6 +854,181 @@ find_bootstrap_sh() {
     echo "$dir/bootstrap.sh"
 }
 
+# Dotfile Caches ###############################################################
+################################################################################
+
+# dotfile metas.
+# key:  dotfile name
+# value:  <hash> <deps-start-idx> <num-deps> <tags-start-idx> <num-tags>
+declare -A __dotfile_metas
+# dotfile dependency arrays
+declare -a __dotfile_deps
+# dotfile tags value
+declare -a __dotfile_tags
+
+update_cache() {
+    # create cache dir if not exists
+    if [[ ! -d $cache_dir ]]; then
+        mkdir -p "$cache_dir" || {
+            error "Cannot create cache dir '$cache_dir'"
+            return 1
+        }
+    fi
+
+    # read in old cache
+    local cache_file="${cache_dir}/dotfiles.cache"
+    local -a cache_lines
+    [[ -f "$cache_file" ]] && {
+        mapfile -t cache_lines <"$cache_file"
+
+        # parse cache lines
+        local num_dotfiles="${cache_lines[0]}"
+        for i in $(seq 1 "$num_dotfiles"); do
+            local dotfile="${cache_lines["$((2 * i - 1))"]}"
+            local meta="${cache_lines["$((2 * i))"]}"
+            __dotfile_metas["$dotfile"]="$meta"
+        done
+
+        cache_lines=("${cache_lines[@]:$((num_dotfiles * 2 + 1))}")
+        local num_deps="${cache_lines[0]}"
+        __dotfile_deps=("${cache_lines[@]:1:$((num_deps))}")
+
+        cache_lines=("${cache_lines[@]:$((num_deps + 1))}")
+        local num_tags="${cache_lines[0]}"
+        __dotfile_tags=("${cache_lines[@]:1:$((num_tags))}")
+    }
+
+    local -A new_metas
+    local -a new_deps
+    local -a new_tags
+
+    # iterate through all dotfiles and update cache accordingly
+    local -a dotfiles
+    mapfile -t dotfiles <<<"$(filter_valid_dotfiles "t:all")"
+    for dotfile in "${dotfiles[@]}"; do
+        # get file hash
+        local bootstrap_path new_hash
+        bootstrap_path="$(find_bootstrap_sh "$dotfile")" || return $?
+        new_hash="$(md5sum "$bootstrap_path" | cut -d' ' -f1)"
+
+        # skip update if file not changed
+        if [[ "$new_hash" == "$(dotfile_hash "$dotfile")" ]]; then
+            # copy old metas to new metas
+            local deps tags new_meta
+            mapfile -t deps <<<"$(dotfile_deps "$dotfile")"
+            mapfile -t tags <<<"$(dotfile_tags "$dotfile")"
+            new_meta="$(dotfile_hash "$dotfile") \
+                ${#new_deps[@]} ${#deps[@]} ${#new_tags[@]} ${#tags[@]}"
+            new_metas["$dotfile"]="$new_meta"
+            new_deps+=("${deps[@]}")
+            new_tags+=("${tags[@]}")
+            continue
+        fi
+
+        local new_meta="$new_hash"
+
+        # get deps and tags
+        local -a lines=()
+        mapfile -t lines <<<"$(
+            set -eo pipefail
+            declare -a deps=()
+            declare -a tags=()
+            source "$bootstrap_path" >/dev/null
+            echo "${#deps[@]}"
+            for dep in "${deps[@]}"; do echo "$dep"; done
+            echo "${#tags[@]}"
+            for tag in "${tags[@]}"; do echo "$tag"; done
+        )"
+
+        # parse deps and store into array
+        local num_deps="${lines[0]}"
+        new_meta+=" ${#new_deps[@]} $num_deps"
+        for i in $(seq 1 "$num_deps"); do
+            new_deps+=("${lines["$i"]}")
+        done
+        lines=("${lines[@]:$((num_deps + 1))}")
+
+        # parse tags and store into array
+        local num_tags="${lines[0]}"
+        new_meta+=" ${#new_tags[@]} $num_tags"
+        for i in $(seq 1 "$num_tags"); do
+            new_tags+=("${lines["$i"]}")
+        done
+        new_metas["$dotfile"]="$new_meta"
+    done
+
+    # update metadatas
+    __dotfile_metas=()
+    for dotfile in "${!new_metas[@]}"; do
+        __dotfile_metas["$dotfile"]="${new_metas["$dotfile"]}"
+    done
+    __dotfile_deps=("${new_deps[@]}")
+    __dotfile_tags=("${new_tags[@]}")
+
+    # update cache file
+    {
+        echo "${#new_metas[@]}"
+        for dotfile in "${!new_metas[@]}"; do
+            echo "$dotfile"
+            echo "${new_metas["$dotfile"]}"
+        done
+        echo "${#new_deps[@]}"
+        for dep in "${new_deps[@]}"; do echo "$dep"; done
+        echo "${#new_tags[@]}"
+        for tag in "${new_tags[@]}"; do echo "$tag"; done
+    } >|"$cache_file"
+}
+
+# read deps from cache
+# $1: name of the dotfile
+dotfile_hash() {
+    echo "${__dotfile_metas["$1"]%% *}"
+}
+
+# read deps from cache
+# $1: name of the dotfile
+dotfile_deps() {
+    local meta="${__dotfile_metas["$1"]}"
+    [[ -z "$meta" ]] && return 0
+
+    local begin length
+    read -r _ begin length _ _ <<<"$meta"
+    for ((i = begin; i < begin + length; ++i)); do
+        echo "${__dotfile_deps["$i"]}"
+    done
+}
+
+# read deps from cache
+# $1: name of the dotfile
+dotfile_tags() {
+    local meta="${__dotfile_metas["$1"]}"
+    [[ -z "$meta" ]] && return 0
+
+    local begin length
+    read -r _ _ _ begin length <<<"$meta"
+    for ((i = begin; i < begin + length; ++i)); do
+        echo "${__dotfile_tags["$i"]}"
+    done
+}
+
+# find dotfiles trough tags
+# $@: tags
+tags_to_dotfiles() {
+    for dotfile in "${!__dotfile_metas[@]}"; do
+        local dotfile_tags=()
+        mapfile -t dotfile_tags <<<"$(dotfile_tags "$dotfile")"
+        for tag in "$@"; do
+            if [[ " ${dotfile_tags[*]} " == *" $tag "* ]]; then
+                echo "$dotfile"
+                break
+            fi
+        done
+    done
+}
+
+# Help Messages ################################################################
+################################################################################
+
 _HELP_MESSAGE="\
 [1mSYNOPSIS[0m
     ${BASH_SOURCE[0]} [4mCOMMAND[0m [OPTIONS] [4mPKGS[0m...
@@ -909,3 +1099,4 @@ _HELP_MESSAGE="\
 "
 
 main "$@"
+# TODO: break this file into small libraries
