@@ -130,19 +130,6 @@ main() {
         read -ra pkgs <<<"$pkg_list"
         do_uninstall "${pkgs[@]}"
         ;;
-    c*)
-        cmd="check"
-        # get options, formalize command
-        while [[ $1 =~ $_OPTION_PATTERN ]]; do
-            case $1 in
-            *)
-                error "Option $1 unrecognized"
-                exit 1
-                ;;
-            esac
-            shift
-        done
-        ;;
     l*)
         # TODO: outdated.
         cmd="list" # List packages
@@ -377,6 +364,7 @@ do_uninstall() {
     done
 }
 
+# TODO: add tag support
 # $@: list of dotfiles. 'all' for every valid dotfiles
 # print: list of valid dotfiles
 filter_valid_dotfiles() {
@@ -779,8 +767,6 @@ install_depends() {
     )
 }
 
-
-
 do_new() {
     [[ -z $1 ]] && {
         error "Please specify a name."
@@ -879,40 +865,44 @@ _HELP_MESSAGE="\
         create a new package with template
 
 [1mOPTIONS (install)[0m
-    -n, --no-checkdeps
-        Skip software dependency checking and install dotfiles anyway.
+    -d <DEP_POLICY>, --depends <DEP_POLICY>
+        DEP_POLICY should be one of 'skip', 'check', and 'install'.
 
-    -c, --checkdeps (default)
-        Checks dependencies before installing. If dependency checking fails, the dotfiles will not be installed.
+           skip: Skip dependency installation.
+          check: Check dependencies only, and fail if check does not pass.
+        install: Check and install dependencies.
 
-    -i, --installdeps (implies -c, overrides -n)
-        Install dependencies automatically.
-
-    -u, --user
+    -u, --usermode
         Install everything in user mode (assume no root access is granted)
-
-    -p <PFX>, --prefix <PFX> (implies -u)
-        Prefix for installing packages in user mode. Defaults to $HOME/.local
-
-    -j <JOB_COUNT>, --jobs <JOB_COUNT>
-        Number of parallel jobs for the automake system. Only applies when -u is specified. Defaults to number of cores or 4 (if number of cores cannot be detected).
 
 [1mOPTIONS (uninstall)[0m
     Note that this bootstrap script does not provide functionality to uninstall previously installed dependencies. Please use your distro's package manager or manually uninstall the dependencies. You can check each dotfiles' bootstrap.sh to see what is installed exactly.
 
 [1mOPTIONS (list)[0m
     -d, --depends
-        Also list dependency chain for each package
+        Also list dotfile dependency chain for each package
 
-    -m, --makedepends (overrides -d)
-        Also list makedepends chain for each package.
+    -a, --all-depends (overrides -d)
+        Also list other dependencies for each package.
+
+[1mOPTIONS (new)[0m
+    -u, --usermode
+        Enable usermode support when copying template
+
+    -d <DISTRO>..., --distros <DISTRO>...
+        Enable distro support for <DISTRO> (a list separated by space)
+
+    -t <DIR>, --target-dir <DIR>
+        Specify a target dotfiles directory when multiple directories exists.
+        The specified directory must present in bdm.conf
 
 [1mPKGS[0m
     <name>
         name of a package directory (e.g. vim)
 
-    <tag>
-        packages tagged with <tag>
+    [t:]<tag>
+        packages tagged with <tag>. If a tag and a package happens to have the
+        same name and the 't:' prefix is not used, the package takes precedence.
 
     all
         all avaliable packages
