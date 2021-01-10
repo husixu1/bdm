@@ -269,9 +269,13 @@ do_install() {
         fi
 
         # 2. install misisng dependencies
-        if [[ ${install_options[depends]} == 'install' && \
-            ${#missing_deps[@]} -gt 0 ]]; then
-            install_depends "$dotfile" "${missing_deps[@]}" || return $?
+        if [[ ${#missing_deps[@]} -gt 0 ]]; then
+            if [[ ${install_options[depends]} == 'check' ]]; then
+                error "dependency missing."
+                return 1
+            elif [[ ${install_options[depends]} == 'install' ]]; then
+                install_depends "$dotfile" "${missing_deps[@]}" || return $?
+            fi
         fi
 
         # 3. install dotfiles
