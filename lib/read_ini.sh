@@ -45,6 +45,8 @@
 #
 # (adapted from https://github.com/rudimeier/bash_ini_parser)
 
+if [[ -n $__DEFIND_READ_INI_SH ]]; then return; fi
+declare __DEFIND_READ_INI_SH=1
 
 function read_ini() {
     # Be strict with the prefix, since it's going to be run through eval

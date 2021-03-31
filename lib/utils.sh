@@ -1,4 +1,6 @@
 #!/bin/bash
+if [[ -n $__DEFINED_UTILS_SH ]]; then return; fi
+declare __DEFINED_UTILS_SH=1
 
 # $1: package name to be recognized by package manager
 # $2: executable name. defaults to $1
@@ -14,7 +16,7 @@
 
 # $1: prefix
 # ${@:1} messages
-__print(){
+log:__print() {
     local prefix="$1"
     shift
     local indent=""
@@ -36,18 +38,18 @@ __print(){
 
 # env $INDENT: indent width
 # $@: message, printed one per line
-error() {
-    __print "[1m[91mERR:[0m" "$@" >&2
+log:error() {
+    log:__print "[1m[91mERR:[0m" "$@" >&2
 }
 
-warning() {
-    __print "[1m[93mWRN:[0m" "$@" >&2
+log:warning() {
+    log:__print "[1m[93mWRN:[0m" "$@" >&2
 }
 
-info() {
-    __print "[1m[92mINF:[0m" "$@" >&1
+log:info() {
+    log:__print "[1m[92mINF:[0m" "$@" >&1
 }
 
-debug() {
-    __print "[1m[94mDBG:[0m" "$@" >&2
+log:debug() {
+    log:__print "[1m[94mDBG:[0m" "$@" >&2
 }

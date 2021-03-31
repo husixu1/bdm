@@ -16,21 +16,21 @@ source "$(dirname "${BASH_SOURCE[0]}")"/utils.sh
 # ".DINFO" (see bootstrap_imports.sh)
 
 # $1: dotfile directory
-transaction_start() {
-    if [[ -f "$1/.DINFO.TMP" ]]; then
-        warning "Last installation seems to be interrupted, cleaning ..."
-        rm "$1/.DINFO.TMP"
-    fi
+install:transaction_start() {
+   if [[ -f "$1/.DINFO.TMP" ]]; then
+       log:warning "Last installation seems to be interrupted, cleaning ..."
+       rm "$1/.DINFO.TMP"
+   fi
 }
 
 # $1: dotfile directory
-transaction_commit() {
+install:transaction_commit() {
     if [[ ! -f "$1/.DINFO.TMP" ]]; then
         return 0
     fi
 
     if [[ -f "$1/.DINFO" ]]; then
-        purge "$1"
+        install:purge "$1"
     fi
 
     mv "$1/.DINFO.TMP" "$1/.DINFO"
@@ -46,7 +46,7 @@ transaction_commit() {
 # $6: gid
 # $7: permission
 # return: 0|1: caller should return this value, 2: caller should continue
-install_link_or_file() {
+install:link_or_file() {
     local db_dir src tgt uid gid perm old_records
     db_dir="$1"
     install_type="$2"
@@ -57,29 +57,29 @@ install_link_or_file() {
     perm="$7"
 
     if ! [[ -e $src ]]; then
-        error "$src does not exist"
+        log:error "$src does not exist"
         return 1
     fi
 
     if [[ $install_type == "symlink" ]]; then
         __add_new_record() {
-            __add_record "$db_dir/.DINFO.TMP" 0 "$src" "$tgt" "symlink" "$uid" "$gid" "symlink"
+            db:add_record "$db_dir/.DINFO.TMP" 0 "$src" "$tgt" "symlink" "$uid" "$gid" "symlink"
         }
     elif [[ $install_type == "file" ]]; then
         __add_new_record() {
-            __add_record "$db_dir/.DINFO.TMP" 0 "$src" "$tgt" "$(__hash_file "$tgt")" "$uid" "$gid" "$perm"
+            db:add_record "$db_dir/.DINFO.TMP" 0 "$src" "$tgt" "$(db:hash_file "$tgt")" "$uid" "$gid" "$perm"
         }
     fi
 
     # skip if already installed as new target
-    new_records="$(__find_records "$1/.DINFO.TMP" "source" "$src" "target" "$tgt")"
+    new_records="$(db:find_records "$1/.DINFO.TMP" "source" "$src" "target" "$tgt")"
     if [[ -n "$new_records" ]]; then
-        error "$src --> $tgt can only be installed once in a transaction."
+        log:error "$src --> $tgt can only be installed once in a transaction."
         return 1
     fi
 
     # if old record with same source and target exists, update the old target
-    old_records="$(__find_records "$1/.DINFO" "source" "$src" "target" "$tgt")"
+    old_records="$(db:find_records "$1/.DINFO" "source" "$src" "target" "$tgt")"
     if [[ -n "$old_records" ]]; then
         mapfile -t records <<<"$old_records"
         local i=0
@@ -96,14 +96,14 @@ install_link_or_file() {
             if [[ ("$old_hash" == "symlink" && -L "$old_tgt" && \
                 $old_tgt -ef $src) || (\
                 "$old_hash" != "symlink" && -f "$old_tgt" && \
-                "$(__hash_file "$old_tgt")" == "$old_hash") ]]; then
+                "$(db:hash_file "$old_tgt")" == "$old_hash") ]]; then
 
                 # if old target is still managed by bdm, update directly.
-                info "removing old target $old_tgt"
+                log:info "removing old target $old_tgt"
 
                 # set parameters for removing the old target
                 local remove_old_target=true
-                if [[ "$old_uid" == "$(id -u)" ]]; then
+                if [[ "$old_uid" == "$(id -u root)" ]]; then
                     local remove_asroot=true
                 else
                     local remove_asroot=false
@@ -111,20 +111,20 @@ install_link_or_file() {
                 if [[ "$old_hash" == "symlink" ]]; then
                     local remove_cmd=unlink
                 else
-                    local remove_cmd=rm
-                fi
-            elif [[ -L $old_tgt || -e $old_tgt ]]; then
-                warning "$old_tgt no longer managed by bdm, " \
-                    "Please remove it manually before proceeding."
-                return 1
-            else
-                warning "$old_tgt missing, reinstalling ..."
-            fi
+                   local remove_cmd=rm
+               fi
+           elif [[ -L $old_tgt || -e $old_tgt ]]; then
+               log:warning "$old_tgt no longer managed by bdm, " \
+                   "Please remove it manually before proceeding."
+               return 1
+           else
+               log:warning "$old_tgt missing, reinstalling ..."
+           fi
 
-            ((++i))
+           ((++i))
             # Remove updated old record from old db.
             # Anything remains in old db will be removed in `transaction_commit`
-            __remove_record "$1/.DINFO" "$old_id"
+            db:remove_record "$1/.DINFO" "$old_id"
         done
 
         # remove the old target at last to avoid removing multiple times
@@ -140,14 +140,14 @@ install_link_or_file() {
         # if an old record is not fond, install this as a new record
         if [[ ("$install_type" == "symlink" && -L $tgt && $src -ef $tgt) || (\
             "$install_type" == "file" && -e $tgt && \
-            "$(__hash_file "$tgt")" == "$(__hash_file "$src")") ]]; then
+           "$(db:hash_file "$tgt")" == "$(db:hash_file "$src")") ]]; then
 
-            # if source already installed correctly, simply update db
-            warning "$src --> $tgt already installed, adding record ..."
-            __add_new_record
-            return 0
-        elif [[ -L $tgt || -e $tgt ]]; then
-            error "$tgt is not managed by bdm"
+           # if source already installed correctly, simply update db
+           log:warning "$src --> $tgt already installed, adding record ..."
+           __add_new_record
+           return 0
+       elif [[ -L $tgt || -e $tgt ]]; then
+            log:error "$tgt is not managed by bdm"
             return 1
         fi
     fi
@@ -172,7 +172,7 @@ install_link_or_file() {
         fi
     fi
     __add_new_record
-    info "$src --> $tgt installed"
+    log:info "$src --> $tgt installed"
 }
 
 # $1: dotfile directory
@@ -180,14 +180,14 @@ install_link_or_file() {
 # $3: uid
 # $4: gid
 # $5: permission
-install_directory() {
+install:directory() {
     local tgt old_records
     tgt="$(realpath -ms "$2")"
     uid="$(id -u "$3")"
     gid="$(id -g "$4")"
     perm="$5"
 
-    old_records="$(__find_records "$1/.DINFO" "target" "$tgt" "hash" "directory")"
+    old_records="$(db:find_records "$1/.DINFO" "target" "$tgt" "hash" "directory")"
     if [[ -n "$old_records" ]]; then
         mapfile -t records <<<"$old_records"
 
@@ -202,7 +202,7 @@ install_directory() {
             local old_uid="${record[${__entry_offset["uid"]}]}"
 
             if [[ -d $old_tgt ]]; then
-                info "removing old target $old_tgt"
+                log:info "removing old target $old_tgt"
                 remove_old_target=true
                 if [[ "$uid" == "$(id -u)" ]]; then
                     local remove_asroot=false
@@ -210,10 +210,10 @@ install_directory() {
                     local remove_asroot=true
                 fi
             else
-                info "$old_tgt missing, reinstalling ..."
+                log:info "$old_tgt missing, reinstalling ..."
             fi
             # remove from old database
-            __remove_record "$1/.DINFO" "$old_id"
+            db:remove_record "$1/.DINFO" "$old_id"
             ((++i))
         done
 
@@ -232,8 +232,8 @@ install_directory() {
     else
         sudo install -m "$perm" -o "$uid" -g "$gid" -d "$tgt"
     fi
-    __add_record "$1/.DINFO.TMP" 0 "directory" "$tgt" "directory" "$uid" "$gid" "$perm"
-    info "${tgt/%\//}/ created"
+    db:add_record "$1/.DINFO.TMP" 0 "directory" "$tgt" "directory" "$uid" "$gid" "$perm"
+    log:info "${tgt/%\//}/ created"
 }
 
 # $1: dotfile directory
@@ -243,13 +243,13 @@ install_directory() {
 # $5: optional, set to "asroot" if install symlink as root
 # $6: optional, set to "skiprec" to skip removing db record
 # return: 0|1: caller should return this value, 2: caller should continue
-remove_link_or_file() {
+install:remove_link_or_file() {
     local src tgt raw_records
     install_type="$2"
     src="$(realpath "$3")"
     tgt="$(realpath -ms "$4")"
     if ! [[ -e $src ]]; then
-        error "$src does not exist"
+        log:error "$src does not exist"
         return 1
     fi
 
@@ -271,10 +271,10 @@ remove_link_or_file() {
         else
             $remove_cmd "$tgt"
         fi
-        info "$src --> $tgt removed"
+        log:info "$src --> $tgt removed"
     }
 
-    raw_records="$(__find_records "$1/.DINFO" "source" "$src" "target" "$tgt")"
+    raw_records="$(db:find_records "$1/.DINFO" "source" "$src" "target" "$tgt")"
     if [[ -n "$raw_records" ]]; then
         local records
         mapfile -t records <<<"$raw_records"
@@ -290,41 +290,42 @@ remove_link_or_file() {
 
             if [[ ("$install_type" == "symlink" && -L $old_tgt && $old_tgt -ef $src) || (\
                 "$install_type" == "file" && -f $old_tgt && \
-                "$(__hash_file "$old_tgt")" == "$old_hash") ]]; then
+                "$(db:hash_file "$old_tgt")" == "$old_hash") ]]; then
                 # if old target is correctly installed, simply remove it
-                info "removing $src --> $old_tgt ..."
-                __remove_target
-            elif [[ -L $old_tgt || -e $old_tgt ]]; then
-                warning "$old_tgt no longer managed by bdm, only removing record ..."
-            else
-                warning "$src --> $old_tgt not installed, only removing record ..."
-            fi
+               log:info "removing $src --> $old_tgt ..."
+               __remove_target
+           elif [[ -L $old_tgt || -e $old_tgt ]]; then
+               log:warning "$old_tgt no longer managed by bdm, only removing record ..."
+           else
+               log:warning "$src --> $old_tgt not installed, only removing record ..."
+           fi
 
-            if [[ $6 != "skiprec" ]]; then
-                __remove_record "$1/.DINFO" "$old_id"
+           if [[ $6 != "skiprec" ]]; then
+                db:remove_record "$1/.DINFO" "$old_id"
             fi
             ((++i))
         done
-    else
-        if [[ ("$install_type" == "symlink" && -L $tgt && $src -ef $tgt) || (-f \
-            $tgt && $(__hash_file "$src") == $(__hash_file "$tgt")) ]]; then
-            warning "$src --> $tgt is installed but not recorded, uninstalling anyway..."
-            __remove_target
-        elif [[ -L $tgt || -e $tgt ]]; then
-            warning "$tgt is not managed by bdm, skipping ..."
-        else
-            warning "$src --> $tgt does not exist, skipping ..."
-        fi
-    fi
+   else
+       if [[ ("$install_type" == "symlink" && -L $tgt && $src -ef $tgt) || (-f \
+           $tgt && $(db:hash_file "$src") == $(db:hash_file "$tgt")) ]]; then
+           log:warning "$src --> $tgt is installed but not recorded, uninstalling anyway..."
+           __remove_target
+       elif [[ -L $tgt || -e $tgt ]]; then
+           log:warning "$tgt is not managed by bdm, skipping ..."
+       else
+           log:warning "$src --> $tgt does not exist, skipping ..."
+       fi
+   fi
 }
+
 
 # $1: dotfile directory
 # $2: target location
 # $3: optional, set to "asroot" if root premission required
-remove_directory() {
+install:remove_directory() {
     local tgt raw_records
     tgt="$(realpath -ms "$2")"
-    raw_records="$(__find_records "$1/.DINFO" "target" "$tgt" "hash" "directory")"
+    raw_records="$(db:find_records "$1/.DINFO" "target" "$tgt" "hash" "directory")"
 
     local do_rmdir=true
     if [[ -n "$raw_records" ]]; then
@@ -339,23 +340,23 @@ remove_directory() {
             local old_id="${record[${__entry_offset["id"]}]}"
             local old_tgt="${record[${__entry_offset["target"]}]}"
 
-            if [[ -d $old_tgt ]]; then
-                __remove_record "$1/.DINFO" "$old_id"
-            else
-                warning "$old_tgt missing, removing record ..."
-                __remove_record "$1/.DINFO" "$old_id"
-                do_rmdir=false
-            fi
+           if [[ -d $old_tgt ]]; then
+               db:remove_record "$1/.DINFO" "$old_id"
+           else
+               log:warning "$old_tgt missing, removing record ..."
+               db:remove_record "$1/.DINFO" "$old_id"
+               do_rmdir=false
+           fi
             ((++i))
-        done
-    else
-        if [[ -d "$tgt" ]]; then
-            warning "$tgt is installed but not recorded, uninstalling anyway..."
-        else
-            warning "$tgt does not exist"
-            do_rmdir=false
-        fi
-    fi
+       done
+   else
+       if [[ -d "$tgt" ]]; then
+           log:warning "$tgt is installed but not recorded, uninstalling anyway..."
+       else
+           log:warning "$tgt does not exist"
+           do_rmdir=false
+       fi
+   fi
 
     if $do_rmdir; then
         if [[ "$4" == "asroot" ]]; then
@@ -364,14 +365,14 @@ remove_directory() {
             rmdir --ignore-fail-on-non-empty -p "$tgt"
         fi
     fi
-    info "${2/%\//}/ removed"
+    log:info "${2/%\//}/ removed"
 }
 
 # clean entries in .DINFO file that does not have corresponding `source` file,
 # and also remove associated targets if the target is managed by bdm
 # $1: dotfile directory
-clean() {
-    info "cleaning $1/.DINFO ..."
+install:clean() {
+    log:info "cleaning $1/.DINFO ..."
     if [[ -f "$1/.DINFO" ]]; then
         local lines
         mapfile -t lines <"$1/.DINFO"
@@ -395,7 +396,7 @@ clean() {
             # if source no longer exists, clean the target
             if [[ ! -e "$source" ]]; then
                 records_to_remove[$record_idx]=1
-                info "$source --> $target invalid, removing ..."
+                log:info "$source --> $target invalid, removing ..."
 
                 if [[ $uid == "$(id -u)" ]]; then
                     identity="asuser"
@@ -409,7 +410,7 @@ clean() {
                     install_type="file"
                 fi
 
-                remove_link_or_file "$1" "$install_type" "$source" "$target" "$identity" "skiprec"
+                install:remove_link_or_file "$1" "$install_type" "$source" "$target" "$identity" "skiprec"
             fi
             ((++record_idx))
         done
@@ -431,8 +432,8 @@ clean() {
 
 # remove all entires in .DINFO ifle, remove associated targets
 # $1: dotfile directory
-purge() {
-    info "purging $1/.DINFO ..."
+install:purge() {
+    log:info "purging $1/.DINFO ..."
     if [[ -f "$1/.DINFO" ]]; then
         local lines
         mapfile -t lines <"$1/.DINFO"
@@ -451,7 +452,7 @@ purge() {
                 else
                     sudo rmdir --ignore-fail-on-non-empty -p "$target"
                 fi
-                info "${target/%\//}/ removed"
+                log:info "${target/%\//}/ removed"
             else
                 if [[ "$uid" == "$(id -u)" ]]; then
                     identity="asuser"
@@ -464,7 +465,7 @@ purge() {
                 else
                     local install_type="file"
                 fi
-                remove_link_or_file "$1" "$install_type" "$source" "$target" "$identity" "skiprec"
+                install:remove_link_or_file "$1" "$install_type" "$source" "$target" "$identity" "skiprec"
             fi
             ((++record_idx))
         done
@@ -477,7 +478,7 @@ purge() {
 # Records are store in a plain text file, with each record entry per row
 # the first line of that file is the maximum record id
 
-declare -a __entries=(
+readonly -a __entries=(
     "id"         # a unique id to identify this record
     "source"     # absolute resolved source path
     "target"     # absolut resolved destination path
@@ -486,8 +487,8 @@ declare -a __entries=(
     "gid"        # group id of the target file
     "permission" # file permissions (e.g. 755)
 )
-declare -A __entry_offset
 
+declare -A __entry_offset
 declare i=0
 for r in "${__entries[@]}"; do
     __entry_offset["$r"]=$i
@@ -498,7 +499,7 @@ unset i
 # $1: db file
 # ${@:1}: [entry 1 name, entry 1 value], ... return an entry if all criteria passes
 # print: [entry 1, entry 2, ...], ... (list of records, separated by \n)
-__find_records() {
+db:find_records() {
     if [[ -f "$1" ]]; then
         local lines
         mapfile -t lines <"$1"
@@ -515,7 +516,7 @@ __find_records() {
                 entry_values+=("$1")
                 shift
             else
-                error "Unknown record name $1"
+                log:error "Unknown record name $1"
                 return 1
             fi
         done
@@ -545,7 +546,7 @@ __find_records() {
 # $1: db file
 # ${@:2}: record content, one entry per line.
 # the `id` entry will be ignored and use a generated unique id instead.
-__add_record() {
+db:add_record() {
     local db="$1"
     shift
 
@@ -557,7 +558,7 @@ __add_record() {
     fi
 
     if [[ $# -ne ${#__entries[@]} ]]; then
-        error "record content must have ${#__entries[@]} entries"
+        log:error "record content must have ${#__entries[@]} entries"
         return 1
     fi
 
@@ -584,7 +585,7 @@ __add_record() {
 
 # $1: db file
 # $2: record id
-__remove_record() {
+db:remove_record() {
     if [[ -f "$1" ]]; then
         # read in db and remove record
         local lines
@@ -614,7 +615,7 @@ __remove_record() {
 
 # $1: path to the file
 # print: file hash
-__hash_file() {
+db:hash_file() {
     local md5
     read -r md5 _ <<<"$(md5sum "$1")"
     echo "${md5[0]}"

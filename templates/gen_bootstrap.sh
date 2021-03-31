@@ -13,6 +13,7 @@ declare -a tags=(
     distro:termux"}
 )
 declare -a deps
+declare -a opts=()
 
 if \$ISROOT; then
     # root installation
@@ -32,14 +33,11 @@ fi"'
 export deps tags
 
 ## Dotfiles ####################################################################
-install() {
+bootstrap:install() {
     Clean
-    # Dir "$LOCAL_CONFIG_DIR/a"
+    # NewDir "$LOCAL_CONFIG_DIR/a"
     # Link "$THISDIR/a" "$LOCAL_CONFIG_DIR/a/b"
-}
-
-uninstall() {
-    Purge
+    # Copy "$THISDIR/a" "$LOCAL_CONFIG_DIR/a/b"
 }
 '
 

@@ -1,4 +1,6 @@
 #!/bin/bash
+if [[ -n $__DEFINED_DISTRO_SH ]]; then return ;fi
+declare __DEFINED_DISTRO_SH=1
 
 # From https://unix.stackexchange.com/questions/6345/how-can-i-get-distribution-name-and-version-number-in-a-simple-shell-script
 distro() {
@@ -59,14 +61,14 @@ install_system_package_debian_9() { sudo apt-get install --yes "$@"; }
 install_system_package_debian_10() { sudo apt-get install --yes "$@"; }
 install_system_package_debian_11() { sudo apt-get install --yes "$@"; }
 install_system_package_termux() { apt install --yes "$@"; }
-install_system_package_linux() { error "General linux package not supported"; }
+install_system_package_linux() { log:error "General linux package not supported"; }
 
 install_aur_package() {
     local err="AUR helper command not specified in config file."
     local exe
     read -r exe _ <<<"${CONF__bdm__aur_helper_cmd:?$err}"
     if ! command -v "$exe" >/dev/null 2>&1; then
-        error "Cannot find '$exe' in \$PATH."
+        log:error "Cannot find '$exe' in \$PATH."
         return 1
     fi
     local cmd="${CONF__bdm__aur_helper_cmd:?$err} $*"
@@ -75,20 +77,20 @@ install_aur_package() {
 
 install_userland_package_pkgsrc() {
     if [[ ! -e "${CONF__pkgsrc__prefix:?}/bin/bmake" ]]; then
-        error "command 'bmake' not found. \n" \
+        log:error "command 'bmake' not found. \n" \
             "Pleae check the installation of pkgsrc, and make sure \n" \
             "the [pkgsrc] section in the config file is correctly configured."
         return 1
     fi
     for pkg in "$@"; do
         pushd "${CONF__pkgsrc__src_root:?}/$pkg" || {
-            error "Failed to find pkgsrc package: $pkg"
+            log:error "Failed to find pkgsrc package: $pkg"
             return 1
         }
         "${CONF__pkgsrc__prefix:?}/bin/bmake" install &&
             "${CONF__pkgsrc__prefix:?}/bin/bmake" package
         popd || {
-            error "Internal error: popd"
+            log:error "Internal error: popd"
             return 1
         }
     done
