@@ -32,25 +32,29 @@ source "$BDM_ROOT/lib/read_ini.sh"
 # Read Configs #################################################################
 ################################################################################
 readonly configs=(
-    "$HOME/.bdm.conf"
+    "$HOME/.bdm/bdm.conf"
     "$LOCAL_CONFIG_DIR/bdm.conf"
     "$LOCAL_CONFIG_DIR/bdm/bdm.conf"
     "$BDM_ROOT/bdm.conf"
 )
 
-declare found_config=false
-for config in "${configs[@]}"; do
-    [[ -f "$config" ]] && {
+config=""
+for f in "${configs[@]}"; do
+    [[ -f "$f" ]] && {
+        config="$f"
         read_ini --prefix CONF --booleans 0 "$config"
-        found_config=true
         break
     }
 done
-unset found_config
-$found_config || {
+[[ -n $config ]] || {
     log:error "Cannot find config file"
     exit 1
 }
+
+# for lib/install.sh to store dotfile installation information
+STORAGE_DIR="$(dirname "$config")/var"
+mkdir -p "$STORAGE_DIR"
+export STORAGE_DIR
 
 # global variables
 declare -a dotfile_dirs
@@ -160,12 +164,12 @@ main() {
         # filter a list of valid dotfiles
         local valid_dotfiles
         valid_dotfiles="$(filter_valid_dotfiles "$@")"
-       if [[ -n $valid_dotfiles ]]; then
-           mapfile -t dotfiles <<<"$valid_dotfiles"
-       else
-           log:warning "No dotfile to list..."
-           return 0
-       fi
+        if [[ -n $valid_dotfiles ]]; then
+            mapfile -t dotfiles <<<"$valid_dotfiles"
+        else
+            log:warning "No dotfile to list..."
+            return 0
+        fi
 
         if ${list_options[makedeps]}; then
             # Check for dependency loop, including makedepends
@@ -215,12 +219,12 @@ bdm:install() {
     # filter a list of valid dotfiles
     local valid_dotfiles
     valid_dotfiles="$(filter_valid_dotfiles "$@")"
-   if [[ -n $valid_dotfiles ]]; then
-       mapfile -t dotfiles <<<"$valid_dotfiles"
-   else
-       log:warning "No dotfile to install..."
-       return 0
-   fi
+    if [[ -n $valid_dotfiles ]]; then
+        mapfile -t dotfiles <<<"$valid_dotfiles"
+    else
+        log:warning "No dotfile to install..."
+        return 0
+    fi
 
     # Parse dependency graph
     if [[ ${install_options[depends]} != 'skip' ]]; then
@@ -276,16 +280,16 @@ bdm:install() {
             bootstrap_path="$(find_bootstrap_sh "$dotfile")" || return $?
             source "$bootstrap_path" >/dev/null
 
-           if [[ $(type -t "bootstrap:__install") == "function" ]]; then
-               bootstrap:__install
-           else
-               log:warning "'bootstrap:__install()' not defined in '$bootstrap_path', skipping."
-           fi
-       )
-       [[ $? == 0 ]] || {
-           log:warning "Failed installing $dotfile"
-           return 1
-       }
+            if [[ $(type -t "bootstrap:__install") == "function" ]]; then
+                bootstrap:__install
+            else
+                log:warning "'bootstrap:__install()' not defined in '$bootstrap_path', skipping."
+            fi
+        )
+        [[ $? == 0 ]] || {
+            log:warning "Failed installing $dotfile"
+            return 1
+        }
 
         # 4. evaluate post-install function
         local post_install_func
@@ -340,12 +344,12 @@ bdm:uninstall() {
     # filter a list of valid dotfiles
     local valid_dotfiles
     valid_dotfiles="$(filter_valid_dotfiles "$@")"
-   if [[ -n $valid_dotfiles ]]; then
-       mapfile -t dotfiles <<<"$valid_dotfiles"
-   else
-       log:warning "No dotfile to uninstall..."
-       return 0
-   fi
+    if [[ -n $valid_dotfiles ]]; then
+        mapfile -t dotfiles <<<"$valid_dotfiles"
+    else
+        log:warning "No dotfile to uninstall..."
+        return 0
+    fi
 
     for dotfile in "${dotfiles[@]}"; do
         log:info "Processing $dotfile ..."
@@ -356,17 +360,17 @@ bdm:uninstall() {
             bootstrap_path="$(find_bootstrap_sh "$dotfile")" || return $?
             source "$bootstrap_path" >/dev/null
 
-           if [[ $(type -t "__uninstall") == "function" ]]; then
-               __uninstall >/dev/null
-           else
-               log:warning "'__uninstall()' not defined in '$dotfile/bootstrap.sh', skipping."
-           fi
-       )
-       [[ $? == 0 ]] || {
-           log:warning "Failed uninstalling $dotfile"
-           return 1
-       }
-   done
+            if [[ $(type -t "bootstrap:__uninstall") == "function" ]]; then
+                bootstrap:__uninstall >/dev/null
+            else
+                log:warning "'bootstrap:__uninstall()' not defined in '$dotfile/bootstrap.sh', skipping."
+            fi
+        )
+        [[ $? == 0 ]] || {
+            log:warning "Failed uninstalling $dotfile"
+            return 1
+        }
+    done
 }
 
 # $@: list of dotfiles or tags. 'all' or 't:all' for every valid dotfiles
@@ -412,13 +416,13 @@ require_and_hold_root_access() {
     }
 
     # Require root privilege
-   if sudo -v; then
-       export ISROOT=true
-   else
-       log:warning "Require root failed."
-       echo "All installation process will be done in user mode."
-       echo -n "Those dotfiles that requires root are doomed to fail. Proceed? [y/N]: "
-       read -r ans
+    if sudo -v; then
+        export ISROOT=true
+    else
+        log:warning "Require root failed."
+        echo "All installation process will be done in user mode."
+        echo -n "Those dotfiles that requires root are doomed to fail. Proceed? [y/N]: "
+        read -r ans
         if [[ $ans != y ]]; then
             return 1
         fi
@@ -707,13 +711,13 @@ check_depends() {
                 return 1
                 ;;
             esac
-       done
+        done
 
-       if [[ ${#missing_deps[@]} -gt 0 ]]; then
-           log:warning "$dotfile: Dependency missing: ${missing_deps[*]}" >&2
-       fi
+        if [[ ${#missing_deps[@]} -gt 0 ]]; then
+            log:warning "$dotfile: Dependency missing: ${missing_deps[*]}" >&2
+        fi
 
-       local able_to_meet_dependency=true
+        local able_to_meet_dependency=true
         for dep in "${missing_deps[@]}"; do
 
             # pass to outer shell
@@ -814,13 +818,13 @@ bdm:new() {
             elif [[ $ans == 'q' ]]; then
                 return 0
             elif [[ -n ${dotfile_dirs["$((ans - 1))"]} ]]; then
-               install_dir=${dotfile_dirs["$((ans - 1))"]}
-               break
-           else
-               log:warning "Please sepcify a valid number."
-           fi
-       done
-   fi
+                install_dir=${dotfile_dirs["$((ans - 1))"]}
+                break
+            else
+                log:warning "Please sepcify a valid number."
+            fi
+        done
+    fi
     # TODO: some config for generating template, such as non-root, distro, function, etc
     mkdir -p "$BDM_ROOT/$install_dir/$1"
     source "$BDM_ROOT/templates/gen_bootstrap.sh" >"$BDM_ROOT/$install_dir/$1/bootstrap.sh"
