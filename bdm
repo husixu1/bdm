@@ -2,6 +2,7 @@
 # shellcheck disable=SC1090
 # shellcheck disable=SC2181
 
+set -x
 # Startup Checking #############################################################
 ################################################################################
 # This script requires bash >= 4.3, since it uses `declare -n`
@@ -84,6 +85,9 @@ main() {
         return 0
     }
 
+    # Urgent FIXME: update cache may need the support of many variables,
+    # such as ISROOT. When these variables are missing or changed,
+    # parsing may fail and re-cache is neeeded
     update_cache
 
     # Parse command line #######################################################
@@ -92,15 +96,15 @@ main() {
     local cmd=$1
     shift
 
-    local -A install_options=(
-        [depends]="$CONF__bdm__depends"
-        [usermode]="$CONF__bdm__usermode"
-    )
-
     # TODO: add a function to export dependency graph
     case $cmd in
     i*)
-        cmd="install"
+        # Install a package
+        local -A install_options=(
+            [depends]="$CONF__bdm__depends"
+            [usermode]="$CONF__bdm__usermode"
+        )
+
         while [[ $1 =~ $_OPTION_PATTERN ]]; do
             case $1 in
             "-d" | "--depends")
@@ -134,21 +138,25 @@ main() {
         bdm:install "$@"
         ;;
     u*)
-        cmd="uninstall"
+        # Uninstall a package
         pkg_list="$(parse_uninstall_args "$@")" || return 1
         read -ra pkgs <<<"$pkg_list"
         bdm:uninstall "${pkgs[@]}"
         ;;
     l*)
-        # TODO: outdated.
-        cmd="list" # List packages
+        # List packages
+        local -A list_options=(
+            [depends]=false
+            [tags]=false
+        )
+
         while [[ $1 =~ $_OPTION_PATTERN ]]; do
             case $1 in
             '-d' | '--depends')
-                list_options['rundeps']=true
+                list_options['depends']=true
                 ;;
-            '-m' | '--makedepends')
-                list_options['makedeps']=true
+            '-t' | '--tags')
+                list_options['tags']=true
                 ;;
             *)
                 log:error "Option $1 unrecognized"
@@ -160,10 +168,9 @@ main() {
 
         # dotfiles to list
         local -a dotfiles
-
-        # filter a list of valid dotfiles
         local valid_dotfiles
         valid_dotfiles="$(filter_valid_dotfiles "$@")"
+
         if [[ -n $valid_dotfiles ]]; then
             mapfile -t dotfiles <<<"$valid_dotfiles"
         else
@@ -171,32 +178,32 @@ main() {
             return 0
         fi
 
-        if ${list_options[makedeps]}; then
+        if ${list_options[depends]}; then
             # Check for dependency loop, including makedepends
             dependency_loop_detection "${dotfiles[@]}" || {
                 log:error "Dependency checking failed"
                 return 1
             }
-            # add all dependency, including makedepends to 'dotfiles' and correct their order,
-            mapfile -t dotfiles < <(list_and_sort_dependencies "${dotfiles[@]}")
-            echo "${dotfiles[*]}"
-        elif ${list_options[rundeps]}; then
-            # Check for dependency loop, including makedepends
-            dependency_loop_detection "${dotfiles[@]}" || {
-                log:error "Dependency checking failed"
-                return 1
-            }
-            # add all dependency, including makedepends to 'dotfiles' and correct their order,
-            mapfile -t dotfiles < <(list_and_sort_dependencies "${dotfiles[@]}")
-            echo "${dotfiles[*]}"
-        else
-            echo "${dotfiles[*]}"
+            # # add all dependency, including makedepends to 'dotfiles' and correct their order,
+            # mapfile -t dotfiles < <(list_and_sort_dependencies "${dotfiles[@]}")
         fi
+
+        for dotfile in "${dotfiles[@]}"; do
+            local -a deps tags
+            mapfile -t deps <<<"$(dotfile_deps "$dotfile")"
+            mapfile -t tags <<<"$(dotfile_tags "$dotfile")"
+
+            echo "$dotfile:"
+            echo "  Desc: "
+            echo "  Deps: ${deps[*]}"
+            echo "  Tags: ${tags[*]}"
+            echo
+        done
 
         return 0
         ;;
     n*)
-        cmd="new" # create a new package
+        # create a new package
         bdm:new "$1"
         ;;
     *)
@@ -270,7 +277,10 @@ bdm:install() {
                 log:error "dependency missing."
                 return 1
             elif [[ ${install_options[depends]} == 'install' ]]; then
-                install_depends "$dotfile" "${missing_deps[@]}" || return $?
+                # Don't use `install_depends ... || return $?' here, otherwise
+                # all errexit flags in the install_depends function will be shadowed
+                install_depends "$dotfile" "${missing_deps[@]}"
+                [[ $? == 0 ]] || return 1
             fi
         fi
 
@@ -739,6 +749,7 @@ check_depends() {
 # ${@:1}: a list of missing deps in the `deps` array
 # return: 0 for success, 1 for fail
 install_depends() {
+
     local dotfile=$1
     shift
     local -a missing_deps=("$@")
@@ -747,7 +758,7 @@ install_depends() {
         set -eo pipefail
         unset deps
 
-        # TODO: use cache
+        # TODO: use cache?
         # shellcheck source=./dotfiles/vim/bootstrap.sh
         bootstrap_path="$(find_bootstrap_sh "$dotfile")" || return 1
         source "$bootstrap_path" >/dev/null 2>&1
@@ -806,7 +817,7 @@ bdm:new() {
     if [[ ${#dotfile_dirs[@]} -eq 0 ]]; then
         log:error "'dotfile_dirs' not specified in config file."
     elif [[ ${#dotfile_dirs[@]} -ge 1 ]]; then
-        log:info "Select one of the following to create new dotfile in:"
+        log:info "Select one of the following directories to put the new dotfile package:"
         for i in $(seq "${#dotfile_dirs[@]}"); do
             echo "$i: ${dotfile_dirs[$((i - 1))]}"
         done
@@ -884,25 +895,11 @@ update_cache() {
 
     # read in old cache
     local cache_file="${cache_dir}/dotfiles.cache"
-    local -a cache_lines
+    # local -a cache_lines
     [[ -f "$cache_file" ]] && {
-        mapfile -t cache_lines <"$cache_file"
-
-        # parse cache lines
-        local num_dotfiles="${cache_lines[0]}"
-        for i in $(seq 1 "$num_dotfiles"); do
-            local dotfile="${cache_lines["$((2 * i - 1))"]}"
-            local meta="${cache_lines["$((2 * i))"]}"
-            __dotfile_metas["$dotfile"]="$meta"
-        done
-
-        cache_lines=("${cache_lines[@]:$((num_dotfiles * 2 + 1))}")
-        local num_deps="${cache_lines[0]}"
-        __dotfile_deps=("${cache_lines[@]:1:$((num_deps))}")
-
-        cache_lines=("${cache_lines[@]:$((num_deps + 1))}")
-        local num_tags="${cache_lines[0]}"
-        __dotfile_tags=("${cache_lines[@]:1:$((num_tags))}")
+        while read -r cmd; do
+            eval "${cmd/#declare /declare -g }"
+        done <"$cache_file"
     }
 
     local -A new_metas
@@ -924,8 +921,7 @@ update_cache() {
             local deps tags new_meta
             mapfile -t deps <<<"$(dotfile_deps "$dotfile")"
             mapfile -t tags <<<"$(dotfile_tags "$dotfile")"
-            new_meta="$(dotfile_hash "$dotfile") \
-                ${#new_deps[@]} ${#deps[@]} ${#new_tags[@]} ${#tags[@]}"
+            new_meta="$(dotfile_hash "$dotfile") ${#new_deps[@]} ${#deps[@]} ${#new_tags[@]} ${#tags[@]}"
             new_metas["$dotfile"]="$new_meta"
             new_deps+=("${deps[@]}")
             new_tags+=("${tags[@]}")
@@ -937,14 +933,22 @@ update_cache() {
         # get deps and tags
         local -a lines=()
         mapfile -t lines <<<"$(
-            set -eo pipefail
             declare -a deps=()
             declare -a tags=()
-            source "$bootstrap_path" >/dev/null
-            echo "${#deps[@]}"
-            for dep in "${deps[@]}"; do echo "$dep"; done
-            echo "${#tags[@]}"
-            for tag in "${tags[@]}"; do echo "$tag"; done
+            (
+                set -eo pipefail
+                source "$bootstrap_path" >/dev/null
+            )
+            if [[ $? == 0 ]]; then
+                echo "${#deps[@]}"
+                for dep in "${deps[@]}"; do echo "$dep"; done
+                echo "${#tags[@]}"
+                for tag in "${tags[@]}"; do echo "$tag"; done
+            else
+                log:error "Failed parsing $bootstrap_path"
+                echo 0
+                echo 0
+            fi
         )"
 
         # parse deps and store into array
@@ -973,17 +977,9 @@ update_cache() {
     __dotfile_tags=("${new_tags[@]}")
 
     # update cache file
-    {
-        echo "${#new_metas[@]}"
-        for dotfile in "${!new_metas[@]}"; do
-            echo "$dotfile"
-            echo "${new_metas["$dotfile"]}"
-        done
-        echo "${#new_deps[@]}"
-        for dep in "${new_deps[@]}"; do echo "$dep"; done
-        echo "${#new_tags[@]}"
-        for tag in "${new_tags[@]}"; do echo "$tag"; done
-    } >|"$cache_file"
+    declare -p __dotfile_metas >|"$cache_file"
+    declare -p __dotfile_deps >>"$cache_file"
+    declare -p __dotfile_tags >>"$cache_file"
 }
 
 # read deps from cache
@@ -1109,4 +1105,3 @@ _HELP_MESSAGE="\
 "
 
 main "$@"
-# TODO: break this file into small libraries
