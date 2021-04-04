@@ -2,7 +2,6 @@
 # shellcheck disable=SC1090
 # shellcheck disable=SC2181
 
-set -x
 # Startup Checking #############################################################
 ################################################################################
 # This script requires bash >= 4.3, since it uses `declare -n`
@@ -85,11 +84,6 @@ main() {
         return 0
     }
 
-    # Urgent FIXME: update cache may need the support of many variables,
-    # such as ISROOT. When these variables are missing or changed,
-    # parsing may fail and re-cache is neeeded
-    update_cache
-
     # Parse command line #######################################################
     ############################################################################
     # get command
@@ -135,6 +129,7 @@ main() {
 
         export ISROOT=true
         ${install_options[usermode]} && export ISROOT=false
+
         bdm:install "$@"
         ;;
     u*)
@@ -148,6 +143,7 @@ main() {
         local -A list_options=(
             [depends]=false
             [tags]=false
+            [usermode]="$CONF__bdm__usermode"
         )
 
         while [[ $1 =~ $_OPTION_PATTERN ]]; do
@@ -158,6 +154,10 @@ main() {
             '-t' | '--tags')
                 list_options['tags']=true
                 ;;
+            "-u" | "--usermode")
+                shift
+                list_options[usermode]="$1"
+                ;;
             *)
                 log:error "Option $1 unrecognized"
                 exit 1
@@ -166,41 +166,16 @@ main() {
             shift
         done
 
-        # dotfiles to list
-        local -a dotfiles
-        local valid_dotfiles
-        valid_dotfiles="$(filter_valid_dotfiles "$@")"
+        [[ ' false true ' == *" ${list_options[usermode]} "* ]] || {
+            log:error "-u | --usermode must be followed by either 'true' or 'false'"
+            return 1
+        }
 
-        if [[ -n $valid_dotfiles ]]; then
-            mapfile -t dotfiles <<<"$valid_dotfiles"
-        else
-            log:warning "No dotfile to list..."
-            return 0
-        fi
+        export ISROOT=true
+        ${list_options[usermode]} && export ISROOT=false
 
-        if ${list_options[depends]}; then
-            # Check for dependency loop, including makedepends
-            dependency_loop_detection "${dotfiles[@]}" || {
-                log:error "Dependency checking failed"
-                return 1
-            }
-            # # add all dependency, including makedepends to 'dotfiles' and correct their order,
-            # mapfile -t dotfiles < <(list_and_sort_dependencies "${dotfiles[@]}")
-        fi
-
-        for dotfile in "${dotfiles[@]}"; do
-            local -a deps tags
-            mapfile -t deps <<<"$(dotfile_deps "$dotfile")"
-            mapfile -t tags <<<"$(dotfile_tags "$dotfile")"
-
-            echo "$dotfile:"
-            echo "  Desc: "
-            echo "  Deps: ${deps[*]}"
-            echo "  Tags: ${tags[*]}"
-            echo
-        done
-
-        return 0
+        update_cache "$@"
+        bdm:list "$@"
         ;;
     n*)
         # create a new package
@@ -211,7 +186,6 @@ main() {
         exit 1
         ;;
     esac
-    # TODO: add tag support
 }
 
 # 'bdm:' namesapce avoids function name overwrites
@@ -246,6 +220,12 @@ bdm:install() {
             mapfile -t dotfiles < <(list_and_sort_dependencies "${dotfiles[@]}")
         fi
     fi
+
+    # update_cache needs the support of many variables such as ISROOT.
+    # When these variables are missing or changed, parsing may fail and
+    # re-cache is neeeded, so it needs to be placed here instead of the
+    # beginning of the main function
+    update_cache "${dotfiles[@]}"
 
     echo "dotfiles to install: ${dotfiles[*]}"
     echo -n "Proceed? [Y/n]: "
@@ -380,6 +360,40 @@ bdm:uninstall() {
             log:warning "Failed uninstalling $dotfile"
             return 1
         }
+    done
+}
+
+bdm:list() {
+    # dotfiles to list
+    local -a dotfiles
+    local valid_dotfiles
+    valid_dotfiles="$(filter_valid_dotfiles "$@")"
+
+    if [[ -n $valid_dotfiles ]]; then
+        mapfile -t dotfiles <<<"$valid_dotfiles"
+    else
+        log:warning "No dotfile to list..."
+        return 0
+    fi
+
+    if ${list_options[depends]}; then
+        # Check for dependency loop, including makedepends
+        dependency_loop_detection "${dotfiles[@]}" || {
+            log:error "Dependency checking failed"
+            return 1
+        }
+    fi
+
+    for dotfile in "${dotfiles[@]}"; do
+        local -a deps tags
+        mapfile -t deps <<<"$(dotfile_deps "$dotfile")"
+        mapfile -t tags <<<"$(dotfile_tags "$dotfile")"
+
+        echo "$dotfile:"
+        echo "  Desc: "
+        echo "  Deps: ${deps[*]}"
+        echo "  Tags: ${tags[*]}"
+        echo
     done
 }
 
@@ -789,7 +803,7 @@ install_depends() {
             set +e
             (
                 set -e
-                $install_pkg_command
+                $install_pkg_command # still not working. why???
             )
             [[ $? == 0 ]] || {
                 log:error "$dotfile: Failed to process dependency $dep. Aborting ..."
@@ -877,13 +891,20 @@ find_bootstrap_sh() {
 
 # dotfile metas.
 # key:  dotfile name
-# value:  <hash> <deps-start-idx> <num-deps> <tags-start-idx> <num-tags>
+# value:  <hash> <deps-start-idx> <num-deps> \
+#                <tags-start-idx> <num-tags> \
 declare -A __dotfile_metas
 # dotfile dependency arrays
 declare -a __dotfile_deps
 # dotfile tags value
 declare -a __dotfile_tags
+# dotfile options
+# key: dotfile name
+# value: declare command of the option dict
+declare -A __dotfile_opts
 
+# update cache of certain dotfiles packages
+# $@: name of the dotfile packages
 update_cache() {
     # create cache dir if not exists
     if [[ ! -d $cache_dir ]]; then
@@ -895,7 +916,6 @@ update_cache() {
 
     # read in old cache
     local cache_file="${cache_dir}/dotfiles.cache"
-    # local -a cache_lines
     [[ -f "$cache_file" ]] && {
         while read -r cmd; do
             eval "${cmd/#declare /declare -g }"
@@ -903,29 +923,65 @@ update_cache() {
     }
 
     local -A new_metas
+    local -A new_opts
     local -a new_deps
     local -a new_tags
 
-    # iterate through all dotfiles and update cache accordingly
-    local -a dotfiles
-    mapfile -t dotfiles <<<"$(filter_valid_dotfiles "t:all")"
+    # decide which dotfiles to preserve and which to update
+    local -a dotfiles_to_update dotfiles
+    local -A dotfiles_to_preserve=()
+    for dotfile in "${!__dotfile_metas[@]}"; do
+        dotfiles_to_preserve["$dotfile"]=1
+        dotfiles+=("$dotfile")
+    done
+    mapfile -t dotfiles_to_update <<<"$(filter_valid_dotfiles "$@")"
+    for dotfile in "${dotfiles_to_update[@]}"; do
+        if [[ -z "${dotfiles_to_preserve["$dotfile"]}" ]]; then
+            dotfiles+=("$dotfile")
+        else
+            unset dotfiles_to_preserve["$dotfile"]
+        fi
+    done
+
     for dotfile in "${dotfiles[@]}"; do
         # get file hash
         local bootstrap_path new_hash
         bootstrap_path="$(find_bootstrap_sh "$dotfile")" || return $?
         new_hash="$(md5sum "$bootstrap_path" | cut -d' ' -f1)"
 
-        # skip update if file not changed
-        if [[ "$new_hash" == "$(dotfile_hash "$dotfile")" ]]; then
-            # copy old metas to new metas
-            local deps tags new_meta
-            mapfile -t deps <<<"$(dotfile_deps "$dotfile")"
-            mapfile -t tags <<<"$(dotfile_tags "$dotfile")"
-            new_meta="$(dotfile_hash "$dotfile") ${#new_deps[@]} ${#deps[@]} ${#new_tags[@]} ${#tags[@]}"
-            new_metas["$dotfile"]="$new_meta"
-            new_deps+=("${deps[@]}")
-            new_tags+=("${tags[@]}")
-            continue
+        # if new has is equal to old hash, we need further judgement
+        if [[ "$new_hash" == "$(dotfile_hash "$dotfile")" || -n \
+        "${dotfiles_to_preserve["$dotfile"]}" ]]; then
+            local dotfile_unchanged=true
+
+            if [[ -z "${dotfiles_to_preserve["$dotfile"]}" ]]; then
+                # try to get the old 'opts' dict
+                local -A opts=()
+                eval "${__dotfile_opts["$dotfile"]}"
+                for opt in "${!opts[@]}"; do
+                    if [[ "${opts["$opt"]}" == "${!opt}" ]]; then
+                        dotfile_unchanged=false
+                        break
+                    fi
+                done
+            fi
+
+            # skip if this dotfile does not need to be updated
+            # skip if both file hash and opt keys/values are the same
+            if $dotfile_unchanged; then
+                local -a deps tags
+                mapfile -t deps <<<"$(dotfile_deps "$dotfile")"
+                [[ -z "${deps[*]}" ]] && deps=()
+                mapfile -t tags <<<"$(dotfile_tags "$dotfile")"
+                [[ -z "${tags[*]}" ]] && tags=()
+
+                # copy old metas to new metas
+                new_metas["$dotfile"]="$(dotfile_hash "$dotfile") ${#new_deps[@]} ${#deps[@]} ${#new_tags[@]} ${#tags[@]}"
+                new_opts["$dotfile"]="${__dotfile_opts["$dotfile"]}"
+                new_deps+=("${deps[@]}")
+                new_tags+=("${tags[@]}")
+                continue
+            fi
         fi
 
         local new_meta="$new_hash"
@@ -933,23 +989,24 @@ update_cache() {
         # get deps and tags
         local -a lines=()
         mapfile -t lines <<<"$(
-            declare -a deps=()
-            declare -a tags=()
-            (
-                set -eo pipefail
-                source "$bootstrap_path" >/dev/null
-            )
-            if [[ $? == 0 ]]; then
-                echo "${#deps[@]}"
-                for dep in "${deps[@]}"; do echo "$dep"; done
-                echo "${#tags[@]}"
-                for tag in "${tags[@]}"; do echo "$tag"; done
-            else
-                log:error "Failed parsing $bootstrap_path"
-                echo 0
-                echo 0
-            fi
+            set -eo pipefail
+            unset deps
+            unset tags
+            unset opts
+            source "$bootstrap_path" >/dev/null
+
+            echo "${#deps[@]}"
+            for dep in "${deps[@]}"; do echo "$dep"; done
+            echo "${#tags[@]}"
+            for tag in "${tags[@]}"; do echo "$tag"; done
+            echo "${#opts[@]}"
+            for opt in "${opts[@]}"; do echo "$opt"; done
         )"
+
+        [[ -z "${#lines[@]}" ]] && {
+            log:error "Failed to parse $bootstrap_path"
+            return 1
+        }
 
         # parse deps and store into array
         local num_deps="${lines[0]}"
@@ -965,7 +1022,17 @@ update_cache() {
         for i in $(seq 1 "$num_tags"); do
             new_tags+=("${lines["$i"]}")
         done
+        lines=("${lines[@]:$((num_tags + 1))}")
         new_metas["$dotfile"]="$new_meta"
+
+        local num_opts="${lines[0]}"
+        local -A opts=()
+        for i in $(seq 1 "$num_opts"); do
+            opt_name="${lines["$i"]}"
+            opts["$opt_name"]="${!opt_name}"
+        done
+        lines=("${lines[@]:$((num_opts + 1))}")
+        new_opts["$dotfile"]="$(declare -p opts)"
     done
 
     # update metadatas
@@ -973,13 +1040,20 @@ update_cache() {
     for dotfile in "${!new_metas[@]}"; do
         __dotfile_metas["$dotfile"]="${new_metas["$dotfile"]}"
     done
+    __dotfile_opts=()
+    for dotfile in "${!new_opts[@]}"; do
+        __dotfile_opts["$dotfile"]="${new_opts["$dotfile"]}"
+    done
     __dotfile_deps=("${new_deps[@]}")
     __dotfile_tags=("${new_tags[@]}")
 
     # update cache file
-    declare -p __dotfile_metas >|"$cache_file"
-    declare -p __dotfile_deps >>"$cache_file"
-    declare -p __dotfile_tags >>"$cache_file"
+    {
+        declare -p __dotfile_metas
+        declare -p __dotfile_deps
+        declare -p __dotfile_tags
+        declare -p __dotfile_opts
+    } >|"$cache_file"
 }
 
 # read deps from cache
@@ -1011,6 +1085,17 @@ dotfile_tags() {
     read -r _ _ _ begin length <<<"$meta"
     for ((i = begin; i < begin + length; ++i)); do
         echo "${__dotfile_tags["$i"]}"
+    done
+}
+
+# read existing opts from cache
+# echo: opt_name="opt_value" ..., one per line. This can be read into an array
+# and passed to the 'env'  command
+declare_dotfile_opts() {
+    local cmd="${__dotfile_opts["$1"]}"
+    eval "$cmd"
+    for opt in "${!opts[@]}"; do
+        printf "%s=%q\n" "$opt" "${opts["$opt"]}"
     done
 }
 
@@ -1065,8 +1150,8 @@ _HELP_MESSAGE="\
           check: Check dependencies only, and fail if check does not pass.
         install: Check and install dependencies.
 
-    -u, --usermode
-        Install everything in user mode (assume no root access is granted)
+    -u <true|false>, --usermode <true|false>
+        Install everything in user mode / root mode
 
     -o <OPT1>=<VAL1> ..., --options <OPT1>=<VAL1> ...
         Options passed to package
@@ -1078,8 +1163,14 @@ _HELP_MESSAGE="\
     -d, --depends
         Also list dotfile dependency chain for each package
 
-    -a, --all-depends (overrides -d)
-        Also list other dependencies for each package.
+    -t, --tags
+        Also list all tags for each package
+
+    -u <true|false>, --usermode <true|false>
+        List everything in user mode / root mode
+
+    -o <OPT1>=<VAL1> ..., --options <OPT1>=<VAL1> ...
+        Options passed to package
 
 [1mOPTIONS (new)[0m
     -u, --usermode
