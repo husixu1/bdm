@@ -78,7 +78,7 @@ install_aur_package() {
 install_userland_package_pkgsrc() {
     if [[ ! -e "${CONF__pkgsrc__prefix:?}/bin/bmake" ]]; then
         log:error "command 'bmake' not found. \n" \
-            "Pleae check the installation of pkgsrc, and make sure \n" \
+            "Please check the installation of pkgsrc, and make sure \n" \
             "the [pkgsrc] section in the config file is correctly configured."
         return 1
     fi
