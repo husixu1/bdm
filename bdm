@@ -681,13 +681,9 @@ check_depends() {
         set -eo pipefail
 
         unset tags
-        declare -a deps=()
-
-        # TODO: use cache
-        # Do not redirect stderror to allow error reporting
-        # shellcheck source=./vim/bootstrap.sh
-        bootstrap_path="$(find_bootstrap_sh "$1")" || return 1
-        source "$bootstrap_path" >/dev/null
+        local -a deps=()
+        mapfile -t deps <<< "$(dotfile_deps "$1")"
+        if [[ -z ${deps[*]} ]]; then return 0; fi
 
         # these variables are defined in subshell and
         # does not interfere with the variables outside
@@ -710,7 +706,11 @@ check_depends() {
                 fi
                 ;;
             'function')
-                # Use a function to judge if item exists
+                # if dep_type is function, update corresponding functions
+                bootstrap_path="$(find_bootstrap_sh "$1")" || return 1
+                source "$bootstrap_path" >/dev/null
+
+                # Use a function to decide if item exists
                 set +e
                 (
                     set -e
@@ -772,16 +772,14 @@ install_depends() {
         set -eo pipefail
         unset deps
 
-        # TODO: use cache?
-        # shellcheck source=./dotfiles/vim/bootstrap.sh
-        bootstrap_path="$(find_bootstrap_sh "$dotfile")" || return 1
-        source "$bootstrap_path" >/dev/null 2>&1
-
         for dep in "${missing_deps[@]}"; do
             read -r _ _ install_type install_name <<<"$(parse_dep_info "$dep")"
             case $install_type in
             'function')
                 install_pkg_command="${install_name}"
+                # update functions if install_type is functions
+                bootstrap_path="$(find_bootstrap_sh "$dotfile")" || return 1
+                source "$bootstrap_path" >/dev/null 2>&1
                 ;;
             'system')
                 # package should be installed through package manager.
