@@ -174,7 +174,7 @@ main() {
         export ISROOT=true
         ${list_options[usermode]} && export ISROOT=false
 
-        update_cache "$@"
+        update_cache "$@" || return $?
         bdm:list "$@"
         ;;
     n*)
@@ -195,14 +195,11 @@ bdm:install() {
     ${install_options[usermode]} || require_and_hold_root_access || return 1
 
     # dotfiles to install
-    local -a dotfiles
+    local -a dotfiles=()
 
     # filter a list of valid dotfiles
-    local valid_dotfiles
-    valid_dotfiles="$(filter_valid_dotfiles "$@")"
-    if [[ -n $valid_dotfiles ]]; then
-        mapfile -t dotfiles <<<"$valid_dotfiles"
-    else
+    mapfile -t dotfiles < <(filter_valid_dotfiles "$@")
+    if [[ "${#dotfiles[@]}" -eq 0 ]]; then
         log:warning "No dotfile to install..."
         return 0
     fi
@@ -225,7 +222,7 @@ bdm:install() {
     # When these variables are missing or changed, parsing may fail and
     # re-cache is neeeded, so it needs to be placed here instead of the
     # beginning of the main function
-    update_cache "${dotfiles[@]}"
+    update_cache "${dotfiles[@]}" || return $?
 
     echo "dotfiles to install: ${dotfiles[*]}"
     echo -n "Proceed? [Y/n]: "
@@ -329,14 +326,11 @@ parse_uninstall_args() {
 
 bdm:uninstall() {
     # dotfiles to uninstall
-    local -a dotfiles
+    local -a dotfiles=()
 
     # filter a list of valid dotfiles
-    local valid_dotfiles
-    valid_dotfiles="$(filter_valid_dotfiles "$@")"
-    if [[ -n $valid_dotfiles ]]; then
-        mapfile -t dotfiles <<<"$valid_dotfiles"
-    else
+    mapfile -t dotfiles < <(filter_valid_dotfiles "$@")
+    if [[ "${#dotfiles[@]}" -eq 0 ]]; then
         log:warning "No dotfile to uninstall..."
         return 0
     fi
@@ -386,8 +380,8 @@ bdm:list() {
 
     for dotfile in "${dotfiles[@]}"; do
         local -a deps tags
-        mapfile -t deps <<<"$(dotfile_deps "$dotfile")"
-        mapfile -t tags <<<"$(dotfile_tags "$dotfile")"
+        mapfile -t deps < <(dotfile_deps "$dotfile")
+        mapfile -t tags < <(dotfile_tags "$dotfile")
 
         echo "$dotfile:"
         echo "  Desc: "
@@ -650,25 +644,17 @@ list_and_sort_dependencies() {
 # Extract `d*:` types dependencies from dotfiles' bootstrap file
 # $1: name of the dotfile
 extract_dotfile_depends() {
-    # TODO: use cache
-    (
-        set -eo pipefail
-        # avoid variable contamination of parent shell
-        unset deps
-        unset bootstrap_path
-        bootstrap_path="$(find_bootstrap_sh "$1")" || return 1
-        source "$bootstrap_path" >/dev/null
-        for dep in "${deps[@]}"; do
-            read -r dep_type dep_name _ _ <<<"$(parse_dep_info "$dep")"
-            if [[ $dep_type == "dotfile" ]]; then
-                echo "$dep_name"
-            fi
-        done
-    )
-    if [[ $? != 0 ]]; then
-        log:error "Failed to extract dotfile dependencies for $1"
-        exit 1
-    fi
+    # avoid variable contamination of parent shell
+    local -a deps=()
+    mapfile -t deps < <(dotfile_deps "$1")
+    if [[ "${deps[*]}" -eq 0 ]]; then return 0; fi
+
+    for dep in "${deps[@]}"; do
+        read -r dep_type dep_name _ _ <<<"$(parse_dep_info "$dep")"
+        if [[ $dep_type == "dotfile" ]]; then
+            echo "$dep_name"
+        fi
+    done
 }
 
 # $1 dotfile dir name
@@ -682,7 +668,7 @@ check_depends() {
 
         unset tags
         local -a deps=()
-        mapfile -t deps <<< "$(dotfile_deps "$1")"
+        mapfile -t deps <<<"$(dotfile_deps "$1")"
         if [[ -z ${deps[*]} ]]; then return 0; fi
 
         # these variables are defined in subshell and
@@ -932,7 +918,7 @@ update_cache() {
         dotfiles_to_preserve["$dotfile"]=1
         dotfiles+=("$dotfile")
     done
-    mapfile -t dotfiles_to_update <<<"$(filter_valid_dotfiles "$@")"
+    mapfile -t dotfiles_to_update < <(filter_valid_dotfiles "$@")
     for dotfile in "${dotfiles_to_update[@]}"; do
         if [[ -z "${dotfiles_to_preserve["$dotfile"]}" ]]; then
             dotfiles+=("$dotfile")
@@ -967,11 +953,9 @@ update_cache() {
             # skip if this dotfile does not need to be updated
             # skip if both file hash and opt keys/values are the same
             if $dotfile_unchanged; then
-                local -a deps tags
-                mapfile -t deps <<<"$(dotfile_deps "$dotfile")"
-                [[ -z "${deps[*]}" ]] && deps=()
-                mapfile -t tags <<<"$(dotfile_tags "$dotfile")"
-                [[ -z "${tags[*]}" ]] && tags=()
+                local -a deps=() tags=()
+                mapfile -t deps < <(dotfile_deps "$dotfile")
+                mapfile -t tags < <(dotfile_tags "$dotfile")
 
                 # copy old metas to new metas
                 new_metas["$dotfile"]="$(dotfile_hash "$dotfile") ${#new_deps[@]} ${#deps[@]} ${#new_tags[@]} ${#tags[@]}"
@@ -986,7 +970,7 @@ update_cache() {
 
         # get deps and tags
         local -a lines=()
-        mapfile -t lines <<<"$(
+        mapfile -t lines < <(
             set -eo pipefail
             unset deps
             unset tags
@@ -999,9 +983,9 @@ update_cache() {
             for tag in "${tags[@]}"; do echo "$tag"; done
             echo "${#opts[@]}"
             for opt in "${opts[@]}"; do echo "$opt"; done
-        )"
+        )
 
-        [[ -z "${#lines[@]}" ]] && {
+        [[ "${#lines[@]}" -eq 0 ]] && {
             log:error "Failed to parse $bootstrap_path"
             return 1
         }
@@ -1102,7 +1086,7 @@ declare_dotfile_opts() {
 tags_to_dotfiles() {
     for dotfile in "${!__dotfile_metas[@]}"; do
         local dotfile_tags=()
-        mapfile -t dotfile_tags <<<"$(dotfile_tags "$dotfile")"
+        mapfile -t dotfile_tags < <(dotfile_tags "$dotfile")
         for tag in "$@"; do
             if [[ " ${dotfile_tags[*]} " == *" $tag "* ]]; then
                 echo "$dotfile"
