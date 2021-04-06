@@ -288,17 +288,17 @@ bdm:install() {
             bootstrap_path="$(find_bootstrap_sh "$dotfile")" || return 1
             source "$bootstrap_path" >/dev/null
 
-            if [[ $(type -t "post_install") == "function" ]]; then
-                declare -pf post_install
+            if [[ $(type -t "bootstrap:post_install") == "function" ]]; then
+                declare -pf bootstrap:post_install
             fi
         )"
 
         [[ -n ${post_install_func} ]] && {
-            log:info "Executing post_install function of $dotfile"
+            log:info "Executing bootstrap:post_install function of $dotfile"
             eval "${post_install_func}"
 
             bootstrap:post_install || {
-                log:error "$dotfile: Failed executing the post_install function. " \
+                log:error "$dotfile: Failed executing the bootstrap:post_install function. " \
                     "Aborting to avoid subsequent failures..."
                 return 1
             }
@@ -785,12 +785,12 @@ install_depends() {
             # package should be installed through function, in a subshell,
             # so that set -e works correctly (both "exceptions" and returned
             # error code are captured)
-            # We have to use this crooked way to simulate try-catch ...
+            # We have to use this crooked way to simulate try-catch in an errexit environment ...
             # see https://stackoverflow.com/questions/29532904/bash-subshell-errexit-semantics
             set +e
             (
                 set -e
-                $install_pkg_command # still not working. why???
+                $install_pkg_command
             )
             [[ $? == 0 ]] || {
                 log:error "$dotfile: Failed to process dependency $dep. Aborting ..."
