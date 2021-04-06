@@ -1,4 +1,6 @@
 #!/bin/bash
+if [[ -n $__DEFINED_INSTALL_SH ]]; then return ;fi
+declare __DEFINED_INSTALL_SH=1
 
 #shellcheck source=./utils.sh
 source "$(dirname "${BASH_SOURCE[0]}")"/utils.sh

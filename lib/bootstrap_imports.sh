@@ -37,7 +37,7 @@ THISDIR=$({ cd "$(dirname "${BASH_SOURCE[0]}")" || exit; } && pwd -P)
 # install wrapper
 bootstrap:__install() {
     export LOG_INDENT=4
-    install:transaction_start "$THISDIR"
+    install:transaction_start "$THISDIR.db"
     # don't exit when fail
     if bootstrap:install; then
         result=true
@@ -54,7 +54,7 @@ bootstrap:__install() {
 
 bootstrap:__uninstall() {
     export LOG_INDENT=4
-    install:transaction_start "$THISDIR"
+    install:transaction_start "$THISDIR.db"
     if install:purge; then
         result=true
     else
