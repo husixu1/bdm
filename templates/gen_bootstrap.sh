@@ -2,7 +2,7 @@
 # shellcheck disable=SC2016
 
 template='#!/bin/bash
-eval "$(cat "$BDM_ROOT/lib/bootstrap_imports.sh")"
+eval "$(cat "$BDM_LIBDIR/bootstrap_imports.sh")"
 '"
 ## Dependencies ################################################################
 declare -a tags=(

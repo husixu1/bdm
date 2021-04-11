@@ -1,6 +1,6 @@
-source "$BDM_ROOT/lib/utils.sh"
-source "$BDM_ROOT/lib/distro.sh"
-source "$BDM_ROOT/lib/install.sh"
+source "$BDM_LIBDIR/utils.sh"
+source "$BDM_LIBDIR/distro.sh"
+source "$BDM_LIBDIR/install.sh"
 
 # $1: source location
 # $2: target location

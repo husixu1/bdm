@@ -14,21 +14,26 @@ fi
 [[ $EUID -eq 0 ]] && {
     echo "This script cannot be run as root," \
         "as it might cause unexpected damage." >&2
-    exit 1
-}
+        exit 1
+    }
 
-BDM_ROOT=$(
-    cd "$(dirname "${BASH_SOURCE[0]}")" || exit
+BDM_PREFIX=$(
+    cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")" || exit
     pwd
 )
-export BDM_ROOT
+export BDM_PREFIX
+
+# replaced by Makefile
+BDM_LIBDIR="@BDM_LIBDIR@"
+BDM_CONFDIR="@BDM_CONFDIR@"
+export BDM_LIBDIR
 
 # Init & Includes ##############################################################
 ################################################################################
-source "$BDM_ROOT/lib/utils.sh"
-source "$BDM_ROOT/lib/distro.sh"
-source "$BDM_ROOT/lib/read_ini.sh"
-source "$BDM_ROOT/lib/install.sh"
+source "$BDM_LIBDIR/utils.sh"
+source "$BDM_LIBDIR/distro.sh"
+source "$BDM_LIBDIR/read_ini.sh"
+source "$BDM_LIBDIR/install.sh"
 
 # Read Configs #################################################################
 ################################################################################
@@ -36,7 +41,7 @@ readonly configs=(
     "$HOME/.bdm/bdm.conf"
     "$LOCAL_CONFIG_DIR/bdm.conf"
     "$LOCAL_CONFIG_DIR/bdm/bdm.conf"
-    "$BDM_ROOT/bdm.conf"
+    "$BDM_CONFDIR/bdm.conf"
 )
 
 config=""
@@ -53,13 +58,21 @@ done
 }
 
 # for lib/install.sh to store dotfile installation information
-STORAGE_DIR="$(dirname "$config")/var"
+# STORAGE_DIR="$(dirname "$config")/var"
+# FIXME: This dir or global /var ? seems like for different users we need to store to difference places... but what about dotfiles dir?
+STORAGE_DIR="$LOCAL_CONFIG_DIR/bdm/.db"
 mkdir -p "$STORAGE_DIR"
 export STORAGE_DIR
 
 # global variables
-declare -a dotfile_dirs
-read -ra dotfile_dirs <<<"${CONF__bdm__dotfile_dirs:-dotfiles}"
+declare -a dotfile_dirs parsed_dotfile_dirs
+read -ra dotfile_dirs <<<"${CONF__bdm__dotfile_dirs:-~/.config/bdm/dotfiles}"
+for dotfile_dir in "${dotfile_dirs[@]}"; do
+    parsed_dotfile_dirs+=("${dotfile_dir/#\~/$HOME}")
+done
+dotfile_dirs=("${parsed_dotfile_dirs[@]}")
+unset parsed_dotfile_dirs
+
 declare cache_dir="${CONF__bdm__cache_dir:-$HOME/.cache/bdm}"
 cache_dir="${cache_dir/#\~/$HOME}"
 mkdir -p "$cache_dir" || return 1
@@ -209,7 +222,6 @@ main() {
 
         # list installed packages
         export ISROOT=true
-        ${list_options[usermode]} && export ISROOT=false
         update_cache || return $?
         bdm:list "$@"
         ;;
@@ -466,7 +478,7 @@ filter_valid_dotfiles() {
     [[ $# -eq 1 && ($1 == "all" || $1 == "t:all") ]] && {
         items=()
         for dir in "${dotfile_dirs[@]}"; do
-            mapfile -t list < <(ls "$BDM_ROOT/$dir")
+            mapfile -t list < <(ls "$dir")
             items+=("${list[@]}")
         done
     }
@@ -905,12 +917,12 @@ bdm:new() {
         done
     fi
     # TODO: some config for generating template, such as non-root, distro, function, etc
-    mkdir -p "$BDM_ROOT/$install_dir/$1"
-    source "$BDM_ROOT/templates/gen_bootstrap.sh" >"$BDM_ROOT/$install_dir/$1/bootstrap.sh"
+    mkdir -p "$install_dir/$1"
+    source "$BDM_LIBDIR/templates/gen_bootstrap.sh" >"$install_dir/$1/bootstrap.sh"
     if command -v "$EDITOR" >/dev/null 2>&1; then
-        $EDITOR "$BDM_ROOT/$install_dir/$1/bootstrap.sh"
+        $EDITOR "$install_dir/$1/bootstrap.sh"
     else
-        log:info "\$EDITOR not set, template copied to $BDM_ROOT/$install_dir/$1"
+        log:info "\$EDITOR not set, template copied to $install_dir/$1"
     fi
 }
 
@@ -920,9 +932,9 @@ bdm:new() {
 # return: 1 if not found
 find_dotfile_dir() {
     for dir in "${dotfile_dirs[@]}"; do
-        if [[ -d "$BDM_ROOT/$dir/$1" && -f \
-            "$BDM_ROOT/$dir/$1/bootstrap.sh" ]]; then
-            echo "$BDM_ROOT/$dir/$1"
+        if [[ -d "$dir/$1" && -f \
+            "$dir/$1/bootstrap.sh" ]]; then
+            echo "$dir/$1"
             return 0
         fi
     done
