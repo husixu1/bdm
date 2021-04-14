@@ -1,5 +1,5 @@
 #!/bin/bash
-if [[ -n $__DEFINED_INSTALL_SH ]]; then return ;fi
+if [[ -n $__DEFINED_INSTALL_SH ]]; then return; fi
 declare __DEFINED_INSTALL_SH=1
 
 #shellcheck source=./utils.sh
@@ -32,7 +32,7 @@ install:transaction_commit() {
 
 ## Install/Uninstall functions #################################################
 
-# $1: installation type (symlink, file)
+# $1: installation type ('symlink' for soft linking, 'file' for file copy)
 # $2: source file
 # $3: target location
 # $4: uid
@@ -71,26 +71,31 @@ install:link_or_file() {
             )
             install:db_add_record tmp_db record
         }
-    fi
-
-    # skip if already installed as new target
-    filter() {
-        local -n rec="$1"
-        [[ ${rec[source]} == "$src" && ${rec[target]} == "$tgt" ]]
-    }
-    new_records="$(install:db_find_records tmp_db filter)"
-    if [[ -n "$new_records" ]]; then
-        log:error "$src --> $tgt can only be installed once in a transaction."
+    else
+        log:error "Unknown installation type '$install_type'"
         return 1
     fi
 
-    old_records="$(install:db_find_records db filter)"
+    # skip if already installed as new target
+    filter_new() {
+        local -n rec="$1"
+        [[ ${rec[target]} == "$tgt" ]]
+    }
+    new_records="$(install:db_find_records tmp_db filter_new)"
+    if [[ -n "$new_records" ]]; then
+        log:error "... --> $tgt can only be installed once in a transaction."
+        return 1
+    fi
+
+    filter_old() {
+        local -n rec="$1"
+        [[ ${rec[source]} == "$src" && ${rec[target]} == "$tgt" ]]
+    }
+    old_records="$(install:db_find_records db filter_old)"
 
     # if old record with same source and target exists, update the old target
     if [[ -n "$old_records" ]]; then
         local remove_old_target=false
-        local i=0
-
         mapfile -t record_cmds <<<"$old_records"
         for record_cmd in "${record_cmds[@]}"; do
             eval "$record_cmd"
@@ -128,7 +133,6 @@ install:link_or_file() {
                 log:warning "$old_tgt missing, reinstalling ..."
             fi
 
-            ((++i))
             # Remove updated old record from old db.
             # Anything remains in old db will be removed in `transaction_commit`
             db:remove_record db "$old_id"
@@ -197,11 +201,16 @@ install:directory() {
         local -n rec="$1"
         [[ ${rec[target]} == "$tgt" && ${rec[hash]} == "directory" ]]
     }
+    new_records="$(install:db_find_records tmp_db filter)"
     old_records="$(install:db_find_records db filter)"
+    if [[ -n "$new_records" ]]; then
+        log:error "'$tgt' can only be installed once in a transaction."
+        return 1
+    fi
+
     if [[ -n "$old_records" ]]; then
         mapfile -t record_cmds <<<"$old_records"
 
-        local i=0
         local remove_old_target=false
         for record_cmd in "${record_cmds[@]}"; do
             eval "$record_cmd"
@@ -222,7 +231,6 @@ install:directory() {
             fi
             # remove from old database
             db:remove_record db "$old_id"
-            ((++i))
         done
 
         if $remove_old_target; then
@@ -375,6 +383,7 @@ install:remove_directory() {
         mapfile -t old_record_cmds <<<"$old_records"
         mapfile -t new_record_cmds <<<"$new_records"
 
+        local record_type="old"
         for record_cmd in "${old_record_cmds[@]}" "--" "${new_record_cmds[@]}"; do
             if [[ -z $record_cmd ]]; then continue; fi
             if [[ "$record_cmd" == "--" ]]; then
@@ -478,7 +487,7 @@ install:clean() {
             db:remove_record db_to_cleanup "$id"
         fi
     done
-    db:save  "$STORAGE_DIR/$(basename "$1")" db_to_cleanup
+    db:save "$STORAGE_DIR/$(basename "$1")" db_to_cleanup
 }
 
 # remove all records in current db, remove associated targets
