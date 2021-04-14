@@ -49,7 +49,3 @@ log:warning() {
 log:info() {
     log:__print "[1m[92mINF:[0m" "$@" >&1
 }
-
-log:debug() {
-    log:__print "[1m[94mDBG:[0m" "$@" >&2
-}
