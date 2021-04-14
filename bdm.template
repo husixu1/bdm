@@ -14,8 +14,8 @@ fi
 [[ $EUID -eq 0 ]] && {
     echo "This script cannot be run as root," \
         "as it might cause unexpected damage." >&2
-        exit 1
-    }
+    exit 1
+}
 
 BDM_PREFIX=$(
     cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")" || exit
@@ -98,6 +98,8 @@ main() {
         return 0
     }
 
+    update_cache || return $?
+
     # Parse command line #######################################################
     ############################################################################
     # get command
@@ -109,8 +111,9 @@ main() {
     i*)
         # Install a package
         local -A install_options=(
-            [depends]="$CONF__bdm__depends"
-            [usermode]="$CONF__bdm__usermode"
+            [depends]="${CONF__bdm__depends:-check}"
+            [usermode]="${CONF__bdm__usermode:-false}"
+            [holdsudo]=true
         )
 
         while [[ $1 =~ $_OPTION_PATTERN ]]; do
@@ -134,6 +137,12 @@ main() {
             "-r" | "--root-mode")
                 install_options[usermode]=false
                 ;;
+                # BDM refresh sudo periodically in the background,
+                # this option turns this behavior off. It's currently only used
+                # for testing (to workaround SimonKagstrom/kcov/issues/325).
+            "-dhs" | "--dont-hold-sudo")
+                install_options[holdsudo]=false
+                ;;
             *)
                 log:error "Option $1 unrecognized"
                 return 1
@@ -154,7 +163,6 @@ main() {
 
         export ISROOT=true
         ${install_options[usermode]} && export ISROOT=false
-        update_cache || return $?
         bdm:install "$@"
         ;;
     u*)
@@ -198,7 +206,6 @@ main() {
 
         export ISROOT=true
         ${search_options[usermode]} && export ISROOT=false
-        update_cache || return $?
         bdm:search "$@"
         ;;
     l*)
@@ -221,8 +228,6 @@ main() {
         done
 
         # list installed packages
-        export ISROOT=true
-        update_cache || return $?
         bdm:list "$@"
         ;;
     n*)
@@ -240,7 +245,9 @@ main() {
 bdm:install() {
     # Preparation install ######################################################
     # require root if not in usermode
-    ${install_options[usermode]} || require_and_hold_root_access || return 1
+    if ${install_options[holdsudo]}; then
+        ${install_options[usermode]} || require_and_hold_root_access || return 1
+    fi
 
     # dotfiles to install
     local -a dotfiles=()
@@ -333,7 +340,7 @@ bdm:install() {
             fi
         )"
 
-        [[ -n ${post_install_func} ]] && {
+        if [[ -n ${post_install_func} ]]; then
             log:info "Executing bootstrap:post_install function of $dotfile"
             eval "${post_install_func}"
 
@@ -344,7 +351,7 @@ bdm:install() {
             }
 
             unset bootstrap:post_install
-        }
+        fi
     done
 }
 
