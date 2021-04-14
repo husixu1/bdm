@@ -531,10 +531,13 @@ require_and_hold_root_access() {
 
     # keep sudo credential cache up-to-date
     while true; do
-        sleep 60
+        sleep 5
         sudo -n true
         kill -0 "$$" 2>/dev/null || exit
     done &
+    pid=$!
+
+    trap_add "kill -- $pid" SIGINT SIGTERM EXIT
 }
 
 # $1 dependency string
@@ -959,7 +962,7 @@ find_bootstrap_sh() {
 if [[ ! -d $cache_dir ]]; then
     mkdir -p "$cache_dir" || {
         log:error "Cannot create cache dir '$cache_dir'"
-        return 1
+        exit 1
     }
 fi
 
@@ -1130,6 +1133,22 @@ tags_to_dotfiles() {
                 break
             fi
         done
+    done
+}
+
+# from https://stackoverflow.com/questions/3338030/multiple-bash-traps-for-the-same-signal#answer-7287873
+trap_add() {
+    trap_add_cmd=$1
+    shift || log:error "${FUNCNAME[0]} usage error"
+    for trap_add_name in "$@"; do
+        trap -- "$(
+            # get existing trap command from output
+            extract_trap_cmd() { printf '%s\n' "${3:-:}"; }
+            # print existing trap command with newline
+            eval "extract_trap_cmd $(trap -p "${trap_add_name}")"
+            # print the new trap command
+            printf '%s\n' "${trap_add_cmd}"
+        )" "${trap_add_name}" || log:error "unable to add to trap ${trap_add_name}"
     done
 }
 
