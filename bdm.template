@@ -108,6 +108,13 @@ main() {
 
     # TODO: add a function to export dependency graph
     case $cmd in
+    -h | --help)
+        echo "$_HELP_MESSAGE"
+        return 0
+        ;;
+    -v | --version)
+        echo "${BASH_SOURCE[0]} @BDM_VERSION@"
+        ;;
     i*)
         # Install a package
         local -A install_options=(
@@ -194,15 +201,6 @@ main() {
             '-d' | '--depends')
                 search_options['depends']=true
                 ;;
-            "-u" | "--user-mode")
-                install_options[usermode]=true
-                ;;
-            "-r" | "--root-mode")
-                install_options[usermode]=false
-                ;;
-            "-i" | "--installed")
-                install_options[installed]=true
-                ;;
             *)
                 log:error "Option $1 unrecognized"
                 exit 1
@@ -210,9 +208,6 @@ main() {
             esac
             shift
         done
-
-        export ISROOT=true
-        ${search_options[usermode]} && export ISROOT=false
         bdm:search "$@"
         ;;
     l*)
@@ -233,8 +228,7 @@ main() {
             esac
             shift
         done
-
-        # list installed packages
+        # list only installed packages
         bdm:list "$@"
         ;;
     n*)
@@ -441,11 +435,13 @@ bdm:list() {
     local dotfile_name
     local -a installed_dotfiles
     for db_file in "$STORAGE_DIR"/*.db; do
-        dotfile_name="$(basename "${db_file%.db}")"
-        local -gA tmp_db=()
-        db:load "$db_file" tmp_db
-        if [[ "${#tmp_db[@]}" -gt 0 && -n "${dotfiles_set["$dotfile_name"]}" ]]; then
-            installed_dotfiles+=("$dotfile_name")
+        if [[ -f "$db_file" ]]; then
+            dotfile_name="$(basename "${db_file%.db}")"
+            local -gA tmp_db=()
+            db:load "$db_file" tmp_db
+            if [[ "${#tmp_db[@]}" -gt 0 && -n "${dotfiles_set["$dotfile_name"]}" ]]; then
+                installed_dotfiles+=("$dotfile_name")
+            fi
         fi
     done
 
@@ -478,8 +474,12 @@ filter_valid_dotfiles() {
     [[ $# -eq 1 && ($1 == "all" || $1 == "t:all") ]] && {
         items=()
         for dir in "${dotfile_dirs[@]}"; do
-            mapfile -t list < <(ls "$dir")
-            items+=("${list[@]}")
+            if [[ -d "$dir" ]]; then
+                mapfile -t list < <(ls "$dir")
+                items+=("${list[@]}")
+            else
+                log:warning "dotfiles dir '$dir' does not exist"
+            fi
         done
     }
 
@@ -1166,97 +1166,40 @@ trap_add() {
 
 _HELP_MESSAGE="\
 [1mSYNOPSIS[0m
-    ${BASH_SOURCE[0]} [4mCOMMAND[0m [OPTIONS] [4mPKGS[0m...
+    ${BASH_SOURCE[0]} [4mCOMMAND[0m [OPTIONS] [4m<name>|[t:]<tag>|all[0m...
 
-    e.g.
-
+    ${BASH_SOURCE[0]} i -i t:all
     ${BASH_SOURCE[0]} install vim git
-    ${BASH_SOURCE[0]} install -i all
     ${BASH_SOURCE[0]} uninstall git
     ${BASH_SOURCE[0]} search -t -d vim tmux
     ${BASH_SOURCE[0]} list -f t:all
     ${BASH_SOURCE[0]} new zsh
 
-[1mCOMMAND[0m
-    i*, install
-        install packages specified by PKGS
+[1mCOMMAND & OPTIONS[0m
+    i*, install:
+        -d <DEP_POLICY>, --depends <DEP_POLICY>
+        -s, --skip-depends
+        -c, --check-depends
+        -i, --install-depends
+        -u, --user-mode
+        -r, --root-mode
 
     u*, uninstall
-        install packages specified by PKGS
+        No options available
 
-    s*, search
-        search in available packages
+	s*, search
+        -t, --tags
+        -d, --depends
 
     l*, list
-        list installed packages
+        -f, --files
 
     n*, new
-        create a new package with template
-
-[1mOPTIONS (install)[0m
-    -d <DEP_POLICY>, --depends <DEP_POLICY>
-        DEP_POLICY should be one of 'skip', 'check', and 'install'.
-
-           skip: Skip dependency installation.
-          check: Check dependencies only, and fail if check does not pass.
-        install: Check and install dependencies.
-
-    -s, --skip-depends
-        same as '-d skip'
-
-    -c, --check-depends
-        same as '-d check'
-
-    -i, --install-depends
-        same as '-d install'
-
-    -u, --user-mode
-        Install everything in user mode
-
-    -r, --root-mode root mode
-        Install everything in root mode
-
-[1mOPTIONS (uninstall)[0m
-    Note that this bootstrap script does not provide functionality to uninstall previously installed dependencies. Please use your distro's package manager or manually uninstall the dependencies. You can check each dotfiles' bootstrap.sh to see what is installed exactly.
-
-[1mOPTIONS (search)[0m
-    -t, --tags
-        Also list all tags for each package
-
-    -d, --depends
-        Also list all depends for each package
-
-    -u, --user-mode
-        List everything in user mode
-
-    -r, --root-mode
-        List everything in root mode
-
-[1mOPTIONS (list)[0m
-    -f, --files
-        Also list installed files for each package
-
-[1mOPTIONS (new)[0m
-    -u, --usermode
-        Enable usermode support when copying template
-
-    -d <DISTRO>..., --distros <DISTRO>...
-        Enable distro support for <DISTRO> (a list separated by space)
-
-    -t <DIR>, --target-dir <DIR>
-        Specify a target dotfiles directory when multiple directories exists.
-        The specified directory must present in bdm.conf
-
-[1mPKGS[0m
-    <name>
-        name of a package directory (e.g. vim)
-
-    [t:]<tag>
-        packages tagged with <tag>. If a tag and a package happens to have the
-        same name and the 't:' prefix is not used, the package takes precedence.
-
-    all
-        all avaliable packages
+        -u, --usermode
+        -d <DISTRO>..., --distros <DISTRO>...
+        -t <DIR>, --target-dir <DIR>
 "
+# TODO: support options for the <new> command
+# TOFO: fix the update_cache problem
 
 main "$@"

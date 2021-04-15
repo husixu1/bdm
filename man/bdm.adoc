@@ -1,0 +1,141 @@
+BDM(1)
+======
+Sixu Hu <husixu1@hotmail.com>
+{revnumber}
+:doctype: manpage
+:man manual: BDM Manual
+:man source: (https://github.com/husixu1/bdm)
+
+
+NAME
+----
+
+BDM - Bash Dotfile Manager
+
+
+SYNOPSIS
+--------
+
+bdm <<_command,_COMMAND_>> <<options,_[OPTIONS]_>> <<_packages,_PACKAGES_...>>
+
+e.g.
+
+bdm install vim git +
+bdm i -i all +
+bdm uninstall git +
+bdm search -t -d vim tmux +
+bdm list -f t:all +
+bdm new zsh +
+
+
+COMMAND
+-------
+i* (install)::
+    install packages specified by PKGS
+
+u* (uninstall)::
+    install packages specified by PKGS
+
+s* (search)::
+    search in available packages
+
+l* (list)::
+    list installed packages
+
+n* (new)::
+    create a new package with template
+
+
+[[options]]
+OPTIONS (install)
+-----------------
+
+-d <DEP_POLICY>, --depends <DEP_POLICY>::
+    DEP_POLICY should be one of _skip_, _check_, and _install_.
+
+....
+   skip: Skip dependency installation.
+  check: Check dependencies only, and fail if check does not pass.
+install: Check and install dependencies.
+....
+
+-s, --skip-depends::
+    same as _-d skip_
+
+-c, --check-depends::
+    same as _-d check_
+
+-i, --install-depends::
+    same as _-d install_
+
+-u, --user-mode::
+    Install everything in user mode
+
+-r, --root-mode::
+    Install everything in root mode
+
+
+OPTIONS (uninstall)
+-------------------
+
+Note that this bootstrap script does not provide functionality to uninstall previously installed dependencies. Please use your distro's package manager or manually uninstall the dependencies. You can check each dotfiles' bootstrap.sh to see what is installed exactly.
+
+
+OPTIONS (search)
+----------------
+
+-t, --tags::
+    Also list all tags for each package
+
+-d, --depends::
+    Also list all depends for each package
+
+
+OPTIONS (list)
+--------------
+
+-f, --files::
+    Also list installed files for each package
+
+
+OPTIONS (new)
+-------------
+
+-u, --usermode::
+    Enable usermode support when copying template
+
+-d <DISTRO>..., --distros <DISTRO>...::
+    Enable distro support for <DISTRO> (a list separated by space)
+
+-t <DIR>, --target-dir <DIR>::
+    Specify a target dotfiles directory when multiple directories exists.
+    The specified directory must present in bdm.conf
+
+
+PACKAGES
+--------
+<name>::
+    name of a package directory (e.g. vim)
+
+[t:]<tag>::
+    packages tagged with <tag>. If a tag and a package happens to have the
+    same name and the 't:' prefix is not used, the package takes precedence.
+
+all::
+    all avaliable packages
+
+
+SEE ALSO
+--------
+Advanced usage at https://github.com/husixu1/...#TODO
+
+
+BUGS REPORTS
+------------
+For bugs, please submit an issue or pull request to https://
+
+
+COPYRIGHT
+---------
+MIT.
+
