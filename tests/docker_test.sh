@@ -15,9 +15,16 @@ declare -a test_files=(test_*.sh)
 
 # test
 echo "--> Running tests ... "
+all_test_passed=true
 for test_file in "${test_files[@]}"; do
     bash_unit "$test_file"
+    test $? -eq 0 || all_test_passed=false
 done
+
+$all_test_passed || {
+    echo "--> Tests failed. Not generating coverage reports."
+    exit 1
+}
 
 # coverage report.
 # needs to bind mount a host dir to /artifacts when running docker container
