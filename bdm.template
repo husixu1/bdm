@@ -1000,6 +1000,7 @@ update_cache() {
     # read in old tags file
     local cache_file="${cache_dir}/dotfiles.cache"
     [[ -f "$cache_file" ]] && {
+        local cmd=""
         while read -r cmd; do
             eval "${cmd/#declare /declare -g }"
         done <"$cache_file"
@@ -1203,6 +1204,5 @@ _HELP_MESSAGE="\
         -t <DIR>, --target-dir <DIR>
 "
 # TODO: support options for the <new> command
-# TOFO: fix the update_cache problem
 
 main "$@"
