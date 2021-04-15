@@ -167,9 +167,16 @@ main() {
         ;;
     u*)
         # Uninstall a package
-        pkg_list="$(parse_uninstall_args "$@")" || return 1
-        read -ra pkgs <<<"$pkg_list"
-        bdm:uninstall "${pkgs[@]}"
+        while [[ $1 =~ $_OPTION_PATTERN ]]; do
+            case $1 in
+            *)
+                log:error "Option $1 unrecognized"
+                return 1
+                ;;
+            esac
+            shift
+        done
+        bdm:uninstall "$@"
         ;;
     s*)
         # search packages
@@ -355,20 +362,6 @@ bdm:install() {
     done
 }
 
-parse_uninstall_args() {
-    # get options, formalize command
-    while [[ $1 =~ $_OPTION_PATTERN ]]; do
-        case $1 in
-        *)
-            log:error "Option $1 unrecognized"
-            exit 1
-            ;;
-        esac
-        shift
-    done
-    echo "$@"
-}
-
 bdm:uninstall() {
     # dotfiles to uninstall
     local -a dotfiles=()
@@ -552,7 +545,11 @@ require_and_hold_root_access() {
 # can be read into variable with `read -r type name i_type i_name`
 parse_dep_info() {
     local dep_check="${1%%::*}"
-    local dep_install="${1##*::}"
+    if [[ "$1" == *::* ]]; then
+        local dep_install="${1##*::}"
+    else
+        local dep_install=""
+    fi
 
     local -A check_prefix_map=(
         ["v"]="virtual" ["fi"]="file" ["fu"]="function"
@@ -605,11 +602,15 @@ parse_dep_info() {
         # installation type and name is invalid for dotfiles
         install_type="_"
         install_name="_"
-    elif [[ -z $dep_install ]]; then
-        # if item after `::` is not specified, treat as if it's a system
-        # package with the same name of the executable
+    elif [[ $dep_type == "executable" && -z "$dep_install" ]]; then
+        # if item after `::` is not specified, and dep_type is executable,
+        # treat as a system package with the of the same name
         install_type="system"
         install_name="${dep_check#*:}"
+    elif [[ -z "$dep_install" ]]; then
+        # if item after `::` is not specified, report error
+        install_type="unspecified"
+        install_name="unspecified"
     else
         local match_prefix=false
         for prefix in "${!install_prefix_map[@]}"; do
@@ -827,8 +828,9 @@ check_depends() {
 
             # check if this dependency can be met
             read -r _ _ install_type install_name <<<"$(parse_dep_info "$dep")"
-            if [[ $install_type == 'unknown' ]]; then
-                log:error "$dotfile: Dependency '$dep': installation type unknown."
+            if [[ $install_type == 'unknown' || \
+                $install_type == 'unspecified' ]]; then
+                log:error "$dotfile: Dependency '$dep': installation method $install_type."
                 able_to_meet_dependency=false
             fi
         done
