@@ -397,10 +397,10 @@ test_list_nothing() {
     __init_test_dotfile
 
     # list dotfiles
-    output="$(bdm list tag2)"
+    output="$(bdm list tag2 2>&1)"
     assert_equals 0 $?
 
-    # if nothing is installed, should output nothing
+    # if nothing is installed, should output nothing in both stderr and stdout
     [[ -z "${output}" ]] || fail "should output nothing"
 }
 
