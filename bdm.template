@@ -98,23 +98,26 @@ main() {
         return 0
     }
 
-    update_cache || return $?
-
     # Parse command line #######################################################
     ############################################################################
     # get command
     local cmd=$1
     shift
 
-    # TODO: add a function to export dependency graph
+    # avoid updating cache when printing help/version
     case $cmd in
     -h | --help)
         echo "$_HELP_MESSAGE"
         return 0
         ;;
     -v | --version)
-        echo "${BASH_SOURCE[0]} @BDM_VERSION@"
+        echo "bdm @BDM_VERSION@"
+        return 0
         ;;
+    esac
+
+    update_cache || return $?
+    case $cmd in
     i*)
         # Install a package
         local -A install_options=(
