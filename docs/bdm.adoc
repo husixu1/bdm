@@ -4,7 +4,7 @@ Sixu Hu <husixu1@hotmail.com>
 {revnumber}
 :doctype: manpage
 :man manual: BDM Manual
-:man source: (https://github.com/husixu1/bdm)
+:man source: https://github.com/husixu1/bdm
 
 
 NAME

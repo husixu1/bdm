@@ -1,6 +1,7 @@
 pkgtemplatesdir = $(pkglibexecdir)/templates
 
-dist_bin_SCRIPTS = bdm
+bin_SCRIPTS = bdm
+dist_noinst_SCRIPTS = bdm.template
 
 dist_pkglibexec_SCRIPTS =   \
 							lib/distro.sh              \
@@ -24,9 +25,10 @@ bdm: bdm.template
 		$^ > $@
 
 if FOUND_A2X
-dist_man1_MANS = man/BDM.1
-$(dist_man1_MANS): man/bdm.adoc
+man1_MANS = docs/BDM.1
+dist_noinst_DATA = docs/bdm.adoc
+$(man1_MANS): docs/bdm.adoc
 	a2x --doctype manpage --format manpage $^
 endif
 
-CLEANFILES = ${dist_bin_SCRIPTS} ${dist_man1_MANS}
+CLEANFILES = ${bin_SCRIPTS} ${man1_MANS}
