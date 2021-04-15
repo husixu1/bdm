@@ -272,9 +272,9 @@ test_install_resilience_to_foreign_modification() {
     # overwrite user's change.
     assert_not_equals 0 $?
 
-    # the program should complain that the target file is no longer managed
-    mapfile -t stderr_lines < <(echo "$stderr")
-    assert "[[ \"${stderr_lines[0]}\" == *\"no longer managed\"* ]]"
+    # check error output
+    [[ "${stderr//$'\n'/ }" == *"no longer managed"* ]] ||
+        fail "should complain that the target file is no longer managed"
 
     # commit the changes
     install:transaction_commit
@@ -296,9 +296,9 @@ test_install_over_foreign_file() {
     # overwrite user's change.
     assert_not_equals 0 $?
 
-    # the program should complain that the target file is no longer managed
-    mapfile -t stderr_lines < <(echo "$stderr")
-    assert "[[ \"${stderr_lines[0]}\" == *\"not managed\"* ]]"
+    # check error output
+    [[ "${stderr//$'\n'/ }" == *"not managed"* ]] ||
+        fail "should complain that the target file is not managed"
 }
 
 # if db accidentally removed, existing installation
@@ -490,9 +490,9 @@ test_remove_foreign_file() {
     assert_equals 0 $?
     install:transaction_commit
 
-    assert "[ -n \"$stderr\" ]"
-    mapfile -t stderr_lines < <(echo "$stderr")
-    assert "[[ \"${stderr_lines[0]}\" == *skipping* ]]"
+    # check error output
+    [[ "${stderr//$'\n'/ }" == *skipping* ]] ||
+        fail "should warn about the foreign file"
 }
 
 # if db accidentally removed, removal should not be affected in the next round
