@@ -390,8 +390,18 @@ test_search_by_tag() {
 } 1>/dev/null
 
 test_search_details() {
-    :
-}
+    __init_test_dotfile
+
+    output="$(bdm search --tags --depends tag2)"
+    assert_equals 0 $?
+
+    [[ "${output//$'\n'/ }" == *test* ]] ||
+        fail "search should output name of the dotfile"
+    [[ "${output//$'\n'/ }" == *tag1*tag2* ]] ||
+        fail "search should output tags of the dotfile"
+    [[ "${output//$'\n'/ }" == *cowsay*fu:dep_check1::f:dep_func1* ]] ||
+        fail "search should output dependencies of the dotfile"
+} 1>/dev/null
 
 test_list_nothing() {
     __init_test_dotfile
