@@ -104,8 +104,8 @@ OPTIONS (new)
 -u, --usermode::
     Enable usermode support when copying template
 
--d <DISTRO>..., --distros <DISTRO>...::
-    Enable distro support for <DISTRO> (a list separated by space)
+-d <DISTRO>, --distros <DISTRO>::
+    Enable distro support for <DISTRO>. This option can be used multiple times to specify differnet distros
 
 -t <DIR>, --target-dir <DIR>::
     Specify a target dotfiles directory when multiple directories exists.
@@ -115,24 +115,24 @@ OPTIONS (new)
 PACKAGES
 --------
 <name>::
-    name of a package directory (e.g. vim)
+    Name of a package directory (e.g. vim).
 
 [t:]<tag>::
-    packages tagged with <tag>. If a tag and a package happens to have the
+    Packages tagged with <tag>. If a tag and a package happens to have the
     same name and the 't:' prefix is not used, the package takes precedence.
 
 all::
-    all avaliable packages
+    All avaliable packages.
 
 
 SEE ALSO
 --------
-Advanced usage at https://github.com/husixu1/...#TODO
+Advanced usage at https://github.com/husixu1/bdm
 
 
 BUGS REPORTS
 ------------
-For bugs, please submit an issue or pull request to https://
+For bugs, please submit an issue or pull request to https://github.com/husixu1/bdm
 
 
 COPYRIGHT

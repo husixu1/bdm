@@ -63,9 +63,45 @@ teardown() {
 ###############################################################################
 
 test_new_dotfile() {
-    bdm new test <<<"1"
+    bdm new test <<<$'1\n'
     assert "[ -d $root_dir/dotfiles/test ]"
     assert "[ -f $root_dir/dotfiles/test/bootstrap.sh ]"
+} 1>/dev/null
+
+test_new_dotfile_with_options_1() {
+    bdm new --target-dir "$root_dir/dotfiles" test
+    assert "[ -d $root_dir/dotfiles/test ]"
+    assert "[ -f $root_dir/dotfiles/test/bootstrap.sh ]"
+
+    content="$(tr -d $'\n' <"$root_dir/dotfiles/test/bootstrap.sh")"
+    [[ "${content}" != *NON_ROOT* ]] ||
+        fail "should not generate non-root directive"
+
+    stderr=$(bdm new --target-dir "$root_dir/aaaaaaaa" test2 2>&1 >/dev/null)
+    assert "[ -d $root_dir/dotfiles/test ]"
+    assert "[ -f $root_dir/dotfiles/test/bootstrap.sh ]"
+    [[ "${stderr//$'\n'/ }" == *invalid* ]] ||
+        fail "Should warn the invalid installd directory"
+} 1>/dev/null
+
+test_new_dotfile_with_options_2() {
+    bdm new --target-dir "$root_dir/dotfiles" --usermode test
+    assert "[ -d $root_dir/dotfiles/test ]"
+    assert "[ -f $root_dir/dotfiles/test/bootstrap.sh ]"
+
+    content="$(tr -d $'\n' <"$root_dir/dotfiles/test/bootstrap.sh")"
+    [[ "${content}" == *non-root* ]] ||
+        fail "should generate non_root directive"
+} 1>/dev/null
+
+test_new_dotfile_with_options_3() {
+    bdm new --target-dir "$root_dir/dotfiles" --usermode --distros termux test
+    assert "[ -d $root_dir/dotfiles/test ]"
+    assert "[ -f $root_dir/dotfiles/test/bootstrap.sh ]"
+
+    content="$(tr -d $'\n' <"$root_dir/dotfiles/test/bootstrap.sh")"
+    [[ "${content}" == *termux* ]] ||
+        fail "should generate termux directive"
 } 1>/dev/null
 
 test_intall_empty_dotfile() {

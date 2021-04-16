@@ -235,6 +235,34 @@ main() {
         bdm:list "$@"
         ;;
     n*)
+        # search packages
+        local -A new_options=(
+            [usermode]=''
+            [target_dir]=''
+            [distros]=''
+        )
+
+        while [[ $1 =~ $_OPTION_PATTERN ]]; do
+            case $1 in
+            '-u' | '--usermode')
+                new_options['usermode']=true
+                ;;
+            '-d' | '--distros')
+                shift
+                new_options[distros]+=":$1:"
+                ;;
+            '-t' | '--target-dir')
+                shift
+                new_options[target_dir]="$1"
+                ;;
+            *)
+                log:error "Option $1 unrecognized"
+                exit 1
+                ;;
+            esac
+            shift
+        done
+
         # create a new package
         bdm:new "$1"
         ;;
@@ -912,28 +940,50 @@ bdm:new() {
     if [[ ${#dotfile_dirs[@]} -eq 0 ]]; then
         log:error "'dotfile_dirs' not specified in config file."
     elif [[ ${#dotfile_dirs[@]} -ge 1 ]]; then
-        log:info "Select one of the following directories to put the new dotfile package:"
-        for i in $(seq "${#dotfile_dirs[@]}"); do
-            echo "$i: ${dotfile_dirs[$((i - 1))]}"
-        done
-        while true; do
-            echo -n "Please specify a number [1-${#dotfile_dirs[@]}], (default 1, 'q' to quit): "
-            read -r ans
-            if [[ -z $ans ]]; then
-                break
-            elif [[ $ans == 'q' ]]; then
-                return 0
-            elif [[ -n ${dotfile_dirs["$((ans - 1))"]} ]]; then
-                install_dir=${dotfile_dirs["$((ans - 1))"]}
-                break
-            else
-                log:warning "Please sepcify a valid number."
+        if [[ -n "${new_options[target_dir]}" ]]; then
+            # test if the specified dir is one of the configured dirs ...
+            for dir in "${dotfile_dirs[@]}"; do
+                local dir_found=false
+                if [[ "$dir" -ef "${new_options[target_dir]}" ]]; then
+                    dir_found=true
+                    install_dir="$dir"
+                fi
+            done
+            # ... if not, report erro and exit
+            if ! $dir_found; then
+                log:error "'${new_options[target_dir]}' invalid. " \
+                    "Please specify one of the following directory:"
+                for dir in "${dotfile_dirs[@]}"; do echo "  $dir"; done
+                return 1
             fi
-        done
+        else
+            # if target dir not specified, ask interactively
+            log:info "Select one of the following directories to put the new dotfile package:"
+            for i in $(seq "${#dotfile_dirs[@]}"); do
+                echo "$i: ${dotfile_dirs[$((i - 1))]}"
+            done
+            while true; do
+                echo -n "Please specify a number [1-${#dotfile_dirs[@]}], (default 1, 'q' to quit): "
+                read -r ans
+                if [[ -z $ans ]]; then
+                    break
+                elif [[ $ans == 'q' ]]; then
+                    return 0
+                elif [[ -n ${dotfile_dirs["$((ans - 1))"]} ]]; then
+                    install_dir=${dotfile_dirs["$((ans - 1))"]}
+                    break
+                else
+                    log:warning "Please sepcify a valid number."
+                fi
+            done
+        fi
     fi
-    # TODO: some config for generating template, such as non-root, distro, function, etc
+
     mkdir -p "$install_dir/$1"
-    source "$BDM_LIBDIR/templates/gen_bootstrap.sh" >"$install_dir/$1/bootstrap.sh"
+    NON_ROOT="${new_options[usermode]}" \
+        DEBIAN="$([[ ${new_options[distros]} == :debian: ]] && echo true)" \
+        TERMUX="$([[ ${new_options[distros]} == :termux: ]] && echo true)" \
+        source "$BDM_LIBDIR/templates/gen_bootstrap.sh" >"$install_dir/$1/bootstrap.sh"
     if command -v "$EDITOR" >/dev/null 2>&1; then
         $EDITOR "$install_dir/$1/bootstrap.sh"
     else
@@ -1200,7 +1250,7 @@ _HELP_MESSAGE="\
 
     n*, new
         -u, --usermode
-        -d <DISTRO>..., --distros <DISTRO>...
+        -d <DISTRO>, --distro <DISTRO>
         -t <DIR>, --target-dir <DIR>
 "
 # TODO: support options for the <new> command
