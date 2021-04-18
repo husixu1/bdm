@@ -58,8 +58,6 @@ done
 }
 
 # for lib/install.sh to store dotfile installation information
-# STORAGE_DIR="$(dirname "$config")/var"
-# FIXME: This dir or global /var ? seems like for different users we need to store to difference places... but what about dotfiles dir?
 STORAGE_DIR="$LOCAL_CONFIG_DIR/bdm/.db"
 mkdir -p "$STORAGE_DIR"
 export STORAGE_DIR
@@ -1253,6 +1251,5 @@ _HELP_MESSAGE="\
         -d <DISTRO>, --distro <DISTRO>
         -t <DIR>, --target-dir <DIR>
 "
-# TODO: support options for the <new> command
 
 main "$@"
