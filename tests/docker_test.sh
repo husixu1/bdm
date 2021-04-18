@@ -5,9 +5,15 @@ THISDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 THISDIR="${THISDIR:?"THISDIR not found :("}"
 cd "$THISDIR" || exit 1
 
-# build & install
 pushd .. || exit 1
+# build & install
 ./configure && make && sudo make install
+
+# also make a distribute package as artifact
+make dist
+[[ -d /artifacts ]] && {
+    cp bdm-*.tar.gz /artifacts
+}
 popd || exit 1
 
 # files to run
