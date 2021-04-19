@@ -1,9 +1,9 @@
-# necessary depends for building/running/testing the package
-# required for building: make
-# required for running: sudo
-# required for testing: which diff
+# minimal dependencies for building/running/testing BDM
+# running: sudo
+# building: make
+# testing: which, diff
 pacman -Syu --noconfirm
-pacman -S --noconfirm make sudo which diffutils
+pacman -S --noconfirm sudo make which diffutils
 
 # install bash_unit
 mkdir -p /usr/local/bin

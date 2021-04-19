@@ -1,8 +1,5 @@
 #!/bin/bash
 
-# install kcov dependencies
-pacman -S --noconfirm base-devel cmake python
-
 # install kcov
 version="$(curl --silent "https://api.github.com/repos/SimonKagstrom/kcov/releases/latest" | grep -Po '"tag_name": "\K.*?(?=")')"
 curl -L "https://github.com/SimonKagstrom/kcov/archive/refs/tags/${version}.tar.gz" -o "${version}.tar.gz"

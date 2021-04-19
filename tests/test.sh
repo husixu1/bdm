@@ -19,8 +19,11 @@ docker ps -q >/dev/null 2>&1 || {
     exit 1
 }
 
-# build docker images
+# build cache first, if not exist
 set -eo pipefail
+docker image inspect 'test/kcov' >/dev/null 2>&1 || ./tests/cache.sh
+
+# build docker images
 docker build -t test/dotfiles -f tests/Dockerfile .
 docker image prune -f
 
@@ -31,6 +34,6 @@ mkdir artifacts
 # run tests with docker
 docker run --rm \
     -t \
-    -v"$(realpath ./artifacts)":/artifacts \
+    -v"$(realpath ./artifacts)":/artifacts:rw \
     -u user:user \
     test/dotfiles:latest

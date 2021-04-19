@@ -1,17 +1,28 @@
-# setup the environment
-FROM archlinux as base_test_env
-COPY --chown=1000:1000 ./tests/docker_setup.sh /
-RUN bash ./docker_setup.sh
+# 0. Build a base environment for subsequent building
+FROM archlinux as base
+COPY --chown=1000:1000 ./tests/docker_base_env.sh /
+RUN bash ./docker_base_env.sh
 
-# Build the latest version of kcov,
+FROM base as build_base
+RUN pacman -S --noconfirm base-devel cmake python
+
+# 1. Build the latest version of kcov,
 # to avoid issues like https://github.com/SimonKagstrom/kcov/issues/325
-FROM base_test_env as kcov
+FROM build_base as kcov
 COPY --chown=1000:1000 ./tests/docker_kcov.sh /
 RUN bash ./docker_kcov.sh
 
-# copy the whole project
-FROM base_test_env as complete_test_env
-COPY --from=kcov /usr/local/bin/kcov /usr/local/bin
-COPY --chown=1000:1000 . dotfiles
+# 2. build bdm
+FROM build_base as build_bdm
+COPY --chown=1000:1000 . /dotfiles
 WORKDIR /dotfiles
-ENTRYPOINT bash /dotfiles/tests/docker_test.sh
+RUN bash -c 'autoreconf -i && ./configure && make dist'
+
+# 3. test the whole project
+FROM base as test_bdm
+# copy kcov and bdm builds
+COPY --from=kcov /usr/local/bin/kcov /usr/local/bin
+COPY --from=build_bdm --chown=1000:1000 /dotfiles/bdm-*.tar.gz /home/user
+# build and test bdm
+COPY --chown=1000:1000 ./tests /tests
+ENTRYPOINT bash /tests/docker_test.sh

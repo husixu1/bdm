@@ -4,5 +4,9 @@ THISDIR="${THISDIR:?"THISDIR not found :("}"
 cd "$THISDIR/.." || exit 1
 
 # build named cahce of kcov image to speedup testing
+docker build -t test/base --target=base -f tests/Dockerfile .
+docker image prune -f
+
+# build named cahce of kcov image to speedup testing
 docker build -t test/kcov --target=kcov -f tests/Dockerfile .
 docker image prune -f
