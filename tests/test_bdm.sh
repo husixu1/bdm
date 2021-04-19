@@ -340,7 +340,7 @@ test_install_with_tags() {
     assert "[ -z $(diff "$root_dir/dst/dir1/copy2" "$root_dir/dotfiles/test/file2") ]"
 } 1>/dev/null
 
-test_post_install_func() {
+test_evaluate_func() {
     # create a test1 -> test2 -> test3 dependency loop
     mkdir -p "$root_dir/dotfiles/"test{1,2}
     cat >|"$root_dir/dotfiles/test1/bootstrap.sh" <<-EOF
@@ -350,7 +350,7 @@ test_post_install_func() {
 		bootstrap:install() {
 			NewDir "$root_dir/dst/dir1"
 			if [[ -n \$POST_INSTALL_EXECUTED ]]; then
-				echo "affected by post-install" >| "$root_dir/dst/post-install-file1"
+				echo "affected by evaluate" >| "$root_dir/dst/eval-file1"
 			fi
 		}
 	EOF
@@ -360,8 +360,8 @@ test_post_install_func() {
 		eval "\$(cat "\$BDM_LIBDIR/bootstrap_imports.sh")"
 		deps=(); export deps
 		bootstrap:install() { NewDir "$root_dir/dst/dir2"; }
-		bootstrap:post_install() {
-			echo "post install" >| $root_dir/dst/post-install-file2
+		bootstrap:evaluate() {
+			echo "evaluate" >| $root_dir/dst/eval-file2
 			export POST_INSTALL_EXECUTED=1
 		}
 	EOF
@@ -374,13 +374,43 @@ test_post_install_func() {
     assert "[ -d $root_dir/dst/dir1 ]"
     assert "[ -d $root_dir/dst/dir2 ]"
 
-    # post-install function executed
-    assert "[ -f $root_dir/dst/post-install-file2 ]"
-    assert_equals "post install" "$(cat "$root_dir/dst/post-install-file2")"
+    # evaluate function executed
+    assert "[ -f $root_dir/dst/eval-file2 ]"
+    assert_equals "evaluate" "$(cat "$root_dir/dst/eval-file2")"
 
-    # post-install function can affect subsequent installation
-    assert "[ -f $root_dir/dst/post-install-file1 ]"
-    assert_equals "affected by post-install" "$(cat "$root_dir/dst/post-install-file1")"
+    # evaluate function can affect subsequent installation
+    assert "[ -f $root_dir/dst/eval-file1 ]"
+    assert_equals "affected by evaluate" "$(cat "$root_dir/dst/eval-file1")"
+} 1>/dev/null
+
+test_post_install_func() {
+    # create a test1 -> test2 -> test3 dependency loop
+    mkdir -p "$root_dir/dotfiles/test"
+    cat >|"$root_dir/dotfiles/test/bootstrap.sh" <<-EOF
+		#!/bin/bash
+		eval "\$(cat "\$BDM_LIBDIR/bootstrap_imports.sh")"
+		deps=(); export deps
+		bootstrap:install(){
+			echo "install" >| "$root_dir/dst/install-file"
+		}
+		bootstrap:post_install() {
+			if [[ -f "$root_dir/dst/install-file" ]]; then
+				echo "post install" >| "$root_dir/dst/post-install-file"
+			fi
+		}
+	EOF
+
+    # install
+    bdm install --dont-hold-sudo --install-depends test <<<$'Y\n'
+    assert_equals 0 $?
+
+    # check installation
+    assert "[ -f $root_dir/dst/install-file ]"
+    assert_equals "install" "$(cat "$root_dir/dst/install-file")"
+
+    # check post_install is executed
+    assert "[ -f $root_dir/dst/post-install-file ]"
+    assert_equals "post install" "$(cat "$root_dir/dst/post-install-file")"
 } 1>/dev/null
 
 test_uninstall() {

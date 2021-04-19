@@ -1,4 +1,21 @@
 #!/usr/bin/env bash
+# BDM - A dotfile manager written in bash
+# Copyright (C) 2021  Hu Sixu <husixu1@hotmail.com>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+################################################################################
+
 # shellcheck disable=SC1090
 # shellcheck disable=SC2181
 
@@ -358,30 +375,48 @@ bdm:install() {
         }
 
         # 4. evaluate post-install function
-        local post_install_func
-        post_install_func="$(
+        local evaluate_func
+        evaluate_func="$(
             set -eo pipefail
             export LOG_INDENT=4
             bootstrap_path="$(find_bootstrap_sh "$dotfile")" || return 1
             source "$bootstrap_path" >/dev/null
 
-            if [[ $(type -t "bootstrap:post_install") == "function" ]]; then
-                declare -pf bootstrap:post_install
+            if [[ $(type -t "bootstrap:evaluate") == "function" ]]; then
+                declare -pf bootstrap:evaluate
             fi
         )"
 
-        if [[ -n ${post_install_func} ]]; then
-            log:info "Executing bootstrap:post_install function of $dotfile"
-            eval "${post_install_func}"
+        if [[ -n ${evaluate_func} ]]; then
+            log:info "Executing bootstrap:evaluate function of $dotfile"
+            eval "${evaluate_func}"
 
-            bootstrap:post_install || {
-                log:error "$dotfile: Failed executing the bootstrap:post_install function. " \
+            bootstrap:evaluate || {
+                log:error "$dotfile: Failed executing the bootstrap:evaluate function. " \
                     "Aborting to avoid subsequent failures..."
                 return 1
             }
 
-            unset bootstrap:post_install
+            unset bootstrap:evaluate
         fi
+    done
+
+    for dotfile in "${dotfiles[@]}"; do
+        (
+            set -eo pipefail
+            bootstrap_path="$(find_bootstrap_sh "$dotfile")" || return $?
+            source "$bootstrap_path" >/dev/null
+
+            if [[ $(type -t "bootstrap:post_install") == "function" ]]; then
+                bootstrap:post_install
+            else
+                exit 0
+            fi
+        )
+        [[ $? == 0 ]] || {
+            log:warning "Failed to execute bootstrap:post_install of $dotfile"
+            return 1
+        }
     done
 }
 
@@ -1174,7 +1209,7 @@ dotfile_tags() {
 # read existing opts from cache
 # echo: opt_name="opt_value" ..., one per line. This can be read into an array
 # and passed to the 'env'  command
-declare_dotfile_opts() {
+dotfile_opts() {
     declare -a opts=()
     eval "${__dotfile_opts["$1"]}"
     for opt in "${!opts[@]}"; do
