@@ -137,5 +137,4 @@ For bugs, please submit an issue or pull request to https://github.com/husixu1/b
 
 COPYRIGHT
 ---------
-MIT.
-
+GPL.
