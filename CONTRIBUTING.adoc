@@ -1,0 +1,15 @@
+Contributing Guidelines
+=======================
+
+Generally, all kinds of contributions are welcome. Just note that:
+
+* Merge to the `dev` branch, or open another branch for an individual topic. The `master` branch are for releasing.
+
+Notice the following points for bash code contribution:
+
+* Avoid adding mandatory runtime dependencies to BDM, especially executables not included in https://www.maizure.org/projects/decoded-gnu-coreutils/[coreutils], examples are `sed`, `awk`, and `grep`.
+* If dependencies are to be added to enhance the functionality, they should be optional. i.e. BDM can still run without them.
+* Format bash files with https://github.com/mvdan/sh[shfmt] before firing pull requests. Codes are indented with 4 spaces except for here-document (`<<-EOF...EOF`).
+* Make sure all tests pass. Add/modify corresponding tests if necessary.
+
+If unsure, open an issue. :)

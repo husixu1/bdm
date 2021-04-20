@@ -1,0 +1,206 @@
+BDM -- Bash Dotfile Manager
+===========================
+:toc: preamble
+:source-highlighter: rouge
+
+// badges of testing, coverage, release
+
+image:https://github.com/husixu1/bdm/actions/workflows/testing.yml/badge.svg[https://github.com/husixu1/bdm/actions/workflows/testing.yml]
+image:https://img.shields.io/badge/License-GPLv3-blue.svg[link=https://www.gnu.org/licenses/gpl-3.0.html]
+
+BDM is a small dotfile manager written in pure bash. It does several jobs:
+
+- Install dotfiles (obviously) by either symlinking or copying files, and keep track of the installed files.
+- Dependency management, including:
+** Inter-dotfile dependencies
+** Dependency on system packages
+** User-defined dependencies
+- Execute arbitrary scripts during and after installation.
+
+
+Installation
+------------
+Dependencies: coreutils, sudo.
+Dependencies for building bdm: asciidoc, sed, autotools.
+
+CAUTION: If you're just trying out BDM, you may want to install it in an isolated environment such as a virtual machine or a docker container. BDM is still immature and may pollute or even damage your environment if not treated with care.
+
+Using PKGBUILD (Arch Linux)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+BDM has not been submitted to AUR yet, but we provided a PKGBUILD file to build it. Simply download it from the https://github.com/husixu1/bdm/releases[release page] into an empty directory, and execute `makepkg -si`.
+
+Using the Release Tarball
+~~~~~~~~~~~~~~~~~~~~~~~~~
+First, download the release tarball from the https://github.com/husixu1/bdm/releases[release page], then
+[source,bash]
+----
+tar -xvzf bdm-<version>.tar.gz && cd bdm-<version>
+./configure && make && make install
+----
+
+
+Quick Start
+-----------
+Basics
+~~~~~~
+At each run, bdm will search for config files in the following order, and load the first it founds. The last one is included in the distribution package and serves as a fallback.
+
+- `$HOME/.bdm/bdm.conf`
+- `$HOME/.config/bdm.conf`
+- `$HOME/.config/bdm/bdm.conf`
+- `<install-prefix>/etc/bdm.conf`
+
+In the cofig file, the `dotfile_dirs` option in the `bdm` section specifies where the dotfiles will be loaded. For example, if `dotfile_dirs = ~/.config/bdm/dotfiles`, BDM will search `~/.config/bdm/dotfiles/*/bootstrap.sh` to find dotfile packages, where `*` being the name of the dotfile.
+
+Writing `bootstrap.sh`
+~~~~~~~~~~~~~~~~~~~~~
+
+Executing `bdm new <name>`, bdm will create a new `bootstrap.sh` from a template, and put it into `<dotfile_dir>/<name>/`, where `<dotfile_dir>` is one of `dotfile_dirs` specified in `bdm.conf`. If the `$EDITOR` environment variable is set, bdm will also open this file for editing.
+
+A configured `bootstrap.sh` for looks like this (this is a config of https://github.com/nikp123/xava[xava]):
+
+[[boostrap_example]]
+.~/.config/bdm/dotfiles/xava/bootstrap.sh
+
+[source, bash]
+----
+#!/bin/bash
+eval "$(cat "$BDM_LIBDIR/bootstrap_imports.sh")"
+
+## Dependencies #######################################
+declare -a tags=(
+    support:root
+    distro:arch
+    x11                                             <1>
+    app                                             <2>
+)
+declare -a deps
+declare -a opts=(ISROOT DISTRO)
+
+if $ISROOT; then
+    # root installation
+    deps=()
+    if [[ $DISTRO == arch ]]; then
+        deps+=(yay e:xava::aur:xava)                <3>
+    fi
+fi
+
+export deps tags opts
+
+## Dotfiles ###########################################
+bootstrap:install() {
+    Link "$THISDIR/xava" "$LOCAL_CONFIG_DIR/xava"   <4>
+}
+----
+<1> additional tags 1
+<2> additional tags 2
+<3> dependencies
+<4> dotfile installation command
+
+For simple dotfiles, we only need to add a few instructions to the `tags` and `deps` array, plus the `bootstrap:install` function.
+
+The `tags` array is for categorization purposes, so what tags are added are not important.
+
+The `deps` array in the example above specifies two dependencies: `yay` and `e:xava::aur:xava`, where the first is a dependency of executable named `yay`, and the second specifies a dependency of executable `xava` and its installation method. The installation will be performed if it's missing (`aur:xava` means install from AUR).
+
+For other dependency types, and more complex `bootstrap.sh`, refer to the <<details>> section. Or take a look at https://husixu1/dotfiles-part[my personal dotfile repo] for some examples.
+
+Installing Dotfiles
+~~~~~~~~~~~~~~~~~~~
+To install the configured dotfile, simply execute `bdm install <name>` or `bdm execute <tag>`. This will check if the dependencies specified in the `deps` array exists, and execute `bootstrap:install` it all check passes.
+
+You may also use `bdm install -i <name>` to install the dependencies if some check failed (which often means dependencies are missing), or use `bdm install -s <name>` to skip the dependency checks.
+
+Searching & Listing
+~~~~~~~~~~~~~~~~~~~
+To search for dotfiles, use `bdm search <name>` or `bdm search <tag>`. If the `-t` or `-d` flag is specified, tags or dependencies of each dotfile will also be printed.
+
+To list installed dotfiles, use `bdm list <name>`. If the `-f` flag is specified, every installed file and directories will also be printed.
+
+Uninstalling Dotfiles
+~~~~~~~~~~~~~~~~~~~~~
+
+To uninstall an installed dotfile package, use `bdm uninstall <name>`. Note that dotfile uninstallation will only uninstall files and directories installed by `Link`, `Copy`, and `NewDir` (and their `AsRoot` versions), but not uninstall dependencies. This avoids unintended changes to the user's system.
+
+[#details]
+Bootstrap Script Details
+------------------------
+Tags, Deps and Opts
+~~~~~~~~~~~~~~~~~~~
+There are three arrays recognized by BDM, `tags`, `deps`, and `opts`, their functionalities and syntaxes are described below.
+
+Tags
+^^^^
+The `tags` array records all the tags associated with that dotfile package and is mainly used for searching purposes. There are no naming limitations to tags.
+
+[[deps]]
+Deps
+^^^^
+The `deps` array is the most important array that manages all the dependencies of a dotfile package. Elements in the `deps` array should have the format of `[<check_type>:]<check_name>[::[<install_type>:]<install_name>]`, where `[...]` means that the content inside is optional.
+
+* `<check_type>`: Specifies how the dependency should be checked.
+** empty: default to `d*` (`*` matches any string), but if the dotfile directory `<check_name>` does not exist in any of the `dotfile_dirs`, defaults to `e*`.
+** `e*` (executable): Check if `<check_name>` exists as an executable in `$PATH`.
+** `d*` (dotfile): Dotfiles package `<check_name>` is considered a dependency of current dotfile. Dependency loop detection will be performed recursively on unless `-s` flag is specified when calling BDM.
+** `fi*` (file): `<check_name>` is considered as a file and will be searched to see if it exists.
+** `v*` (virtual): This is a virtual file and will _not_ be considered missing in the dependency checking process, but _always_ considered missing in the dependency installation process.
+** `fu*` (function): This will call the function named `<check_name>` to check if the criteria is met. The function should return 0 when the criteria is met, and any non-zero value otherwise.
+* `<check_name>`: name of the executable/file/function. Its usage depends on `<check_type.`
+* `<check_type>`: Specifies how the dependency should be insetalled.
+** empty: defaults to `s*`, i.e. system package
+** `s*` (system): `<install_name>` is treated as system package to be installed by system's package manager. The installation command is further decided by `$DISTRO` (e.g. `pacman` for Arch-based distros, `apt` for Debian-based distros, etc.).
+** `f*` (function): `<install_name>` is treated as a function, which will be executed when the dependency cheking fails.
+** `a*` (aur): `<install_name>` will be installed as an AUR package.
+** `u*` (userland): use `pkgsrc` to install `<install_name>` no root access. Note that to specify pkgsrc package, the package class must be included, e.g. `sys:editor/vim`
+* `<install_name>`: name of the package/function. If both `<install_type>` and `<install_name>` does not exist, defaults to `s:<check_name>`.
+
+NOTE: The order of elements in the `deps` array is non-trivial. dependencies prefixed with `d*` are always installed before the others. For the rest, those who appear the first will be installed the first.
+
+Opts
+^^^^
+The `opts` array lists all the variables that need to be captured by BDM when installing this dotfile package. This array mainly affects the cache process of BDM and controls whether the `deps` and `tags` array cache need to be updated in the search, listing, and re-installation processes. Generally, any external variable that affects the behavior of the bootstrap script's behavior should be inside the `opts` array. But for most simple dotfiles, `$ISROOT` and `$DISTRO` should be enough (which are added automatically by `bdm new`).
+
+Variables and Functions
+~~~~~~~~~~~~~~~~~~~~~~~
+There are several variables exposed to `bootstrap.sh`:
+
+- `$ISROOT`: Whether this bootstrap script should be installed as the root user.
+- `$DISTRO`: The distro of the current system.
+- `$THISDIR`: The directory where the `bootstrap.sh` resides. Users should _always_ use this variable to specify the locations relative to `bootstrap.sh`, since BDM can be called from any working directory.
+- `$LOCAL_CONFIG_DIR`: Defaults to `$XDG_CONFIG_HOME`. If that variable is empty, defaults to `$HOME/.config`
+
+Also, there are several functions can be used in `bootstrap:install()`:
+
+- `Link <src> <tgt>`: Symlink `<src>` to `<tgt>`.
+- `Copy <src> <tgt>`: Copy `<src>` to `<tgt>`.
+- `NewDir <tgt>`: Create a new directory named `<tgt>`
+
+Their `AsRoot` versions are `LinkAsRoot` `CopyAsRoot` and `NewDirAsRoot`, which, as their names indicate, perform these actions as the root user.
+
+Other types of file manipulation programs such as `cp` or `ln` can also be used directly in `bootstrap:install()`, but they will not be recorded into the database and thus not uninstalled when uninstalling the dotfile.
+
+Functions Called by BDM
+~~~~~~~~~~~~~~~~~~~~~~~
+
+The function `bootstrap:install()` defines how should the resources being installed onto the user's system. Usually this involves linking or copying files to specific locations. Other functionalities can also be added to this function.
+
+If the function `bootstrap:evaluate()` exists in `bootstrap.sh`, it will be called after `boostrap:install()` returns. The difference between these two functions is that `bootstrap:evaluate()` is evaluated in the same shell as the main `BDM` script, while `boostrap:install()` is evaluated in a subshell. If some variables are to be export and used by the next dotfile in the installation queue, the export command can be written in `bootstrap:evaluate()`
+
+If the function `bootstrap:post_install()` function exists in `bootstrap.sh`, it will be called after all installation is finished, in a subshell. This function is useful for printing customized messages at the end of the installation process.
+
+Multi-Distro Support for Dependencies
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Sometimes one may want to use the same configurations across different *nix distros, but different distros often require different naming and installation method for the same dependency. To deal with this issue, users can use the `$ISROOT` and `$DISTRO` variables to decide the environment and set `deps` accordingly.
+
+
+Config File and Package Options
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The `[bdm]` and `[pkgsrc]` sections are recognized by BDM. Details of each configuration can be fonud in the fallback `bdm.conf` (usually `/etc/bdm.conf` or `/usr/etc/bdm.conf`). Arbitrary sections could be added to parameterize the `bootstrap.sh` scripts. Each `<varaible> = <value>` under `[<section>]` in the config file will be translated to `CONF__<section>__<variable>="<value>"` in bash, and `$CONF__<section>__<variable>` can be directly used in each `bootstrap.sh`. Remember that if the value of `tags` and `deps` array is dependent on the variable, it should be added to the `opts` array.
+
+.Credit
+The configuration file is parsed with https://github.com/rudimeier/bash_ini_parser[bash_ini_parser].
+
+Contributing
+------------
+All kinds of contributions are welcome. Please read `docs/dev.adoc` for the design and implementation details of this project, and read `CONTRIBUTING.adoc` before submitting a pull request.
