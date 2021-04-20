@@ -5,9 +5,8 @@ BDM -- Bash Dotfile Manager
 
 // badges of testing, coverage, release
 
-image::https://github.com/husixu1/bdm/actions/workflows/testing.yml/badge.svg[https://github.com/husixu1/bdm/actions/workflows/testing.yml]
-
-image::https://img.shields.io/badge/License-GPLv3-blue.svg[link=https://www.gnu.org/licenses/gpl-3.0.html]
+image:https://github.com/husixu1/bdm/actions/workflows/testing.yml/badge.svg[https://github.com/husixu1/bdm/actions/workflows/testing.yml]
+image:https://img.shields.io/badge/License-GPLv3-blue.svg[link=https://www.gnu.org/licenses/gpl-3.0.html]
 
 BDM is a small dotfile manager written in pure bash. It does several jobs:
 
