@@ -1,0 +1,82 @@
+BDM Details
+===========
+:toc:
+
+Overview
+--------
+Project Hierarchy:
+
+----
+bdm.template              # Source file of the main script.
+bdm.conf                  # Configuration file.
+lib/
+├── bootstrap_imports.sh  # Will be sourced by all 'bootstrap.sh' scripts.
+├── distro.sh             # Distro adaption related code.
+├── install.sh            # Handles the installation of dotfiles.
+├── read_ini.sh           # Config parser (from rudimeier/bash_ini_parser).
+└── utils.sh              # Other trivial utilities.
+tests/
+├── Dockerfile            # Build a Docker container for testing.
+├── docker_setup.sh       # Setup Docker environment.
+├── docker_kcov.sh        # Build latest Kcov inside docker.
+├── docker_test.sh        # Execute 'test_*.sh' and Kcov inside docker.
+├── test_bdm.sh           # Integration testing for bdm.
+├── test_install.sh       # Unit test for 'install.sh'.
+├── cache.sh              # Build a named docker cache to speed up test.sh.
+└── test.sh               # The main test script. Run it to start all tests.
+docs/
+└── bdm.adoc              # Source file of the man page.
+templates/
+└── gen_bootstrap.sh      # Template file of 'bootstrap.sh'.
+----
+
+
+Sources
+-------
+
+bdm.template
+~~~~~~~~~~~~
+Some important functions in the main script are:
+
+* `main()`: Parse command line arguments and dispatch tasks to `bdm:*` functions (such as `bdm:install`).
+* `update_cache()`: Called before executing `bdm:*`, load metadata of `bootstrap.sh` (tags, deps, opts) to memory (`__dotfile_*` arrays in `bdm.template`) to speed up subsequent processing (otherwise every dotfile needs to be sourced at every run, which can be slow when the user's dotfiles repo is large). All subsequent `bdm:*` functions only read from the cache. (Strictly speaking is not a cache system, since there's no mechanism to handle cache miss, but anyway).
+* `bdm:*()`: Where `*` being one of `install`, `search`, `list`, `new`, `uninstall`. Performs corresponding tasks, as their names indicate.
+* `dependency_loop_detection()`: Given one or more dotfiles, use DFS to check whether there's a dependency loop among their `bootstrap.sh`. For example, if the dependency array of `dotfile_a` contains `d:dotfile_b` and that of `dotfile_b` contains `d:dotfile_a`, these two dotfiles forms a dependency loop. Once a dependency loop is detected, BDM will stop and ask the user to break the loop manually.
+* `list_and_sort_dependencies()`: Given one or more dotfiles, use BFS to give a topological order of them and all their dependencies, so that for each dotfile, the dotfiles it depends on will be installed before it.
+
+For other functions, reading their source should give a general idea of what they do.
+
+lib/install.sh
+~~~~~~~~~~~~~~
+
+For each `bootstrap.sh`, a transaction is started with `install:transaction_start()`, which load the old dotfiles installation info (if exists) from disk into the `db` array, and when all the `Link`, `Copy`, and `NewDir` commands are executed by `bootstrap:install()` function, the `install:transaction_commit()` function commit all the changes (now stored in `tmp_db`) onto disk. In this way, we can track what files are installed by the user and perform re/un-installation without letting the user to provide corresponding functions.
+
+`Link`, `Copy` and `NewDir` (defined in `lib/bootstrap_imports.sh`) are simply wrappers of `install:link_or_file()` and `install:directory()`. They provide the user a clean interface to the wrapped functions.
+
+The transaction is guaranteed by the `bootstrap:__install()` and `bootstrap:__uninstall()` functions in `lib/bootstrap_imports.sh`, of which the former is wrapper of the `bootstrap:install()` in each `bootstrap.sh`. The main script directly calls these wrapper function instead of user-provided functions.
+
+The function `install:clean()` deals with source dotfiles removal, but is currently _not_ used anywhere, since all tasks can already be completed by the `install:purge()`. This function is preserved in the source code in hope that it'll be useful someday. Currently, it can be safely ignored.
+
+lib/distro.sh
+~~~~~~~~~~~~~
+
+This file uses the `distro()` function to decide the distro that BDM runs on, and use `install_system_package_<distro>()` to install the system packages defined in the `deps` array of each `bootstrap.sh`. Additionally, it exports `$LOCAL_CONFIG_DIR`, `$DISTRO`, and `$HOST_NAME` to facilitate the writing of `bootstrap.sh`.
+
+
+Tests & Coverage
+----------------
+
+Testing BDM is a challenge since it performs a lot of file operations, and keeping the environment clean is not easy. So we use docker to test the code, which is both convenient and reproducible.
+
+`tests/test.sh` should be executed directly to build the docker image and run the test. The docker image has five separate stages: `base`, `build_base`, `kcov`, `build_bdm`, `test_bdm`).
+
+* The `base` stage calls `tests/docker_base_env.sh` to build a base environment for both building and testing BDM.
+* The `build_base` stage installs more packages to prepare a environment for building kcov and bdm.
+* The `kcov` stage calls `tests/docker_kcov.sh` to build the latest Kcov. At the time of writing this document, the release version of Kcov still has some issues when dealing with a daemonized bash script.
+* The `build_bdm` builds the bdm release tarball.
+* The `test_bdm` stage calls `tests/docker_test.sh` to run all the tests and generate coverage reports in the container.
+
+`tests/cache.sh` builds a named image for the `build_base` stage and and the `kcov` stage to speed up repeated tests since installing packages and building `kcov` requires quite an amount of time.
+
+Test (`tests/test_*.sh`) are written to be run with https://github.com/pgrange/bash_unit[bash_unit]. Although https://github.com/bats-core/bats-core[bats-core] provides better functionality, is not compatible with Kcov and no valid coverage report can be provided.
+
