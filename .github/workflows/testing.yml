@@ -19,7 +19,10 @@ jobs:
         with:
           path: artifacts/bdm-*.tar.gz
           retention-days: 5
-      - name: Upload coverage report
-        uses: codecov/codecov-action@v1
-        with:
-          directory: artifacts/coverage
+
+# codecov cannot correctly process this one
+#      - name: Upload coverage report
+#        uses: codecov/codecov-action@v1
+#        with:
+#          files: artifacts/coverage/kcov-merged/cobertura.xml
+#          env_vars:
