@@ -1,5 +1,10 @@
 name: Testing commits
-on: push
+on:
+  push:
+    paths-ignore:
+      - 'docs/**'
+      - 'README.adoc'
+      - 'CONTRIBUTING.adoc'
 jobs:
   job1-run-tests:
     runs-on: ubuntu-latest
