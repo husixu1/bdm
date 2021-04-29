@@ -43,30 +43,18 @@ THISDIR=$({ cd "$(dirname "${BASH_SOURCE[0]}")" || exit; } && pwd -P)
 bootstrap:__install() {
     export LOG_INDENT=4
     install:transaction_start "$THISDIR.db"
-    # don't exit when fail
-    if bootstrap:install; then
-        result=true
-    else
-        result=false
-    fi
+    # install, fail fast
+    bootstrap:install
     # purge old db
     install:purge
     install:transaction_commit
     unset LOG_INDENT
-
-    $result
 }
 
 bootstrap:__uninstall() {
     export LOG_INDENT=4
     install:transaction_start "$THISDIR.db"
-    if install:purge; then
-        result=true
-    else
-        result=false
-    fi
+    install:purge
     install:transaction_commit
     unset LOG_INDENT
-
-    $result
 }
