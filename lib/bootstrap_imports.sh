@@ -34,7 +34,7 @@ NewDirAsUser() { install:directory "$1" "$(id -u "$2")" "$(id -g "$2")" 755; }
 
 # $1 (optional): source file of the target
 # $2: target (file/link/directory) to backup
-Backup() { install:install:backup_if_not_installed "$@"; }
+Backup() { install:backup_if_not_installed "$@"; }
 
 # The directory in which this `bootstrap.sh` resides
 THISDIR=$({ cd "$(dirname "${BASH_SOURCE[0]}")" || exit; } && pwd -P)
