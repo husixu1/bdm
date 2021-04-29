@@ -20,7 +20,7 @@ if \$ISROOT; then
     deps=()
     if [[ \$DISTRO == arch ]]; then
         deps+=()${DEBIAN:+"
-    elif [[ \$DISTRO ^= debian ]]; then
+    elif [[ \$DISTRO =~ ^debian ]]; then
         deps+=()"}${TERMUX:+"
     elif [[ \$DISTRO == termux ]]; then
         deps+=()"}
