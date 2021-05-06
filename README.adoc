@@ -203,4 +203,4 @@ The configuration file is parsed with https://github.com/rudimeier/bash_ini_pars
 
 Contributing
 ------------
-All kinds of contributions are welcome. Please read `docs/dev.adoc` for the design and implementation details of this project, and read `CONTRIBUTING.adoc` before submitting a pull request.
+All kinds of contributions are welcome. Please read https://github.com/husixu1/bdm/blob/master/docs/dev.adoc[docs/dev.adoc] for the design and implementation details of this project, and read https://github.com/husixu1/bdm/blob/master/CONTRIBUTING.adoc[CONTRIBUTING.adoc] before submitting a pull request.

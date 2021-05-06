@@ -529,6 +529,82 @@ install:purge() {
     db:purge db
 }
 
+# Backup file/link/directory if it's not installed by bdm.
+# If $1 (source file) is not provided, will only check databases, otherwise will
+# also check if the target file matches the source file if database check fails.
+# $1: source file (optional)
+# $2: target location
+install:backup_if_not_installed() {
+    if [[ $# -eq 1 ]]; then
+        tgt="$(realpath -ms "$1")"
+    else
+        src="$(realpath "$1")"
+        tgt="$(realpath -ms "$2")"
+    fi
+
+    # if target does not exist, nothing needs to be done
+    if [[ ! -e "$tgt" && ! -L "$tgt" ]]; then
+        return 0
+    fi
+
+    # utility function for backing up the target
+    backup_target(){
+        target="$1"
+        target_uid="$(stat -c %u "$target")"
+        if [[ "$target_uid" == "$(id -u root)" ]]; then
+            sudo mv "$target" "${target}.bdm_bak_$(date +%s)"
+        else
+            mv "$target" "${target}.bdm_bak_$(date +%s)"
+        fi
+    }
+
+    # check if the target is recorded as installed in database
+    filter() {
+        local -n rec="$1"
+        [[ ${rec[target]} == "$tgt" ]]
+    }
+    old_records="$(install:db_find_records db filter)"
+    new_records="$(install:db_find_records tmp_db filter)"
+    if [[ -n "${old_records}" ]]; then
+        # As each target can only be installed once, we can safely assume
+        # that there is only one record if target is found in old db
+        mapfile -t record_cmds <<<"$old_records"
+        eval "${record_cmds[0]}"
+
+        local old_id="${record[id]}"
+        local old_src="${record[source]}"
+        local old_hash="${record[hash]}"
+        local old_uid="${record[uid]}"
+
+        if [[ ("$old_hash" == "symlink" && "$tgt" -ef "$old_src") || (\
+            "$old_hash" == "directory" && -d "$tgt") || (\
+            "$old_hash" != "symlink" && "$old_hash" != "directory" && -f \
+            "$tgt" && "$(install:hash_file "$tgt")" == "$old_hash") ]]; then
+            # if correctly installed, do nothing.
+            return 0
+        else
+            # if modified externally, backup and remove record from old_db
+            backup_target "$tgt"
+            db:remove_record db "$old_id"
+            return 0
+        fi
+    elif [[ -n "${new_records}" ]]; then
+        # If the tgt is just installed within the same transaction, do nothing
+        return 0
+    fi
+
+    # if not present in database, but src provided, check against src
+    if [[ -n "$src" ]]; then
+        if [[ (-L "$tgt" && "$tgt" -ef "$src") || (-f "$tgt" && \
+            $(install:hash_file "$tgt") == "$(install:hash_file "$src")") ]]; then
+            return 0
+        fi
+    fi
+
+    # if all check failed, just back it up
+    backup_target "$tgt"
+}
+
 ## Install-DB I/O functions ####################################################
 
 # Records are store in a plain text file, with each record entry per row

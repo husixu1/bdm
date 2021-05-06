@@ -18,7 +18,7 @@ setup_suite() {
 
 teardown_suite() {
     popd >/dev/null || return 1
-    rm -r "${root_dir:?}"
+    sudo rm -r "${root_dir:?}"
 }
 
 setup() {
@@ -31,7 +31,7 @@ setup() {
 }
 
 teardown() {
-    rm -r "${root_dir:?}"/*
+    sudo rm -r "${root_dir:?}"/*
 }
 
 test_simple_transaction() {
@@ -520,7 +520,7 @@ test_remove_file_resilience_to_db_removal() {
 } 1>/dev/null 2>&1
 
 # non-existing file should just be skipped
-test_remove_non_existing_file(){
+test_remove_non_existing_file() {
     # remove the installation
     install:transaction_start "$db_name"
     install:remove_link_or_file symlink file1 some_copy
@@ -586,7 +586,7 @@ test_remove_dir_resilience_to_foreign_remove() {
 # remove foreign directory should always succeess, in the directory case,
 # it is equvalent to `resistance_to_db_removal`, since the foreign dir is
 # not recorded in the db.
-test_remove_foreign_directory(){
+test_remove_foreign_directory() {
     # create the directory
     mkdir dir1
     assert "[ -d dir1 ]"
@@ -602,7 +602,7 @@ test_remove_foreign_directory(){
 } 1>/dev/null 2>&1
 
 # this should just skip
-test_remove_non_existing_directory(){
+test_remove_non_existing_directory() {
     install:transaction_start "$db_name"
     install:remove_directory some_dir
     assert_equals 0 $?
@@ -672,4 +672,134 @@ test_purge() {
     # record removed
     db:load "$STORAGE_DIR/$db_name" test_db
     assert_equals 0 "${#test_db[@]}"
+} 1>/dev/null
+
+test_backup_non_existing_target(){
+    install:transaction_start "$db_name"
+    # nothing should happen
+    install:backup_if_not_installed foreign_file
+    assert_equals 0 $?
+    install:transaction_commit
+}
+
+test_backup_foreign_file() {
+    install:transaction_start "$db_name"
+
+    # create a foreign file
+    echo "foreign file" >foreign_file
+    assert "[ -f foreign_file ]"
+
+    install:backup_if_not_installed foreign_file
+    assert_equals 0 $?
+
+    # file successfully backed
+    assert_fail "[ -f foreign_file ]"
+    assert "[ -f foreign_file.bdm_bak_* ]"
+
+    install:transaction_commit
+}
+
+test_backup_with_src() {
+    install:transaction_start "$db_name"
+
+    # install file manually
+    ln -s "file1" "link1"
+    assert "[ -L link1 ]"
+
+    install:backup_if_not_installed file1 link1
+    assert_equals 0 $?
+
+    # link1 should not be backed up
+    assert "[ -L link1 ]"
+    assert_fail "[ -L link1.bdm_bak_* ]"
+
+    install:transaction_commit
+}
+
+test_backup_file_with_sudo(){
+    install:transaction_start "$db_name"
+
+    # create a foreign file
+    echo "foreign file" >foreign_file
+    sudo chown root:root foreign_file
+    assert "[ -f foreign_file ]"
+    assert "[[ $(stat -c %u foreign_file) == $(id -u root) ]]"
+
+    install:backup_if_not_installed foreign_file
+    assert_equals 0 $?
+
+    # file successfully backed
+    assert_fail "[ -f foreign_file ]"
+    assert "[ -f foreign_file.bdm_bak_* ]"
+
+    install:transaction_commit
+}
+
+test_backup_installed_file_1() {
+    install:transaction_start "$db_name"
+    install:link_or_file symlink file1 link1 "$(id -u)" "$(id -g)" 755
+    install:transaction_commit
+
+    install:transaction_start "$db_name"
+    install:backup_if_not_installed link1
+    assert_equals 0 $?
+
+    # link1 should not be backed up
+    assert "[ -L link1 ]"
+    assert_fail "[ -L link1.bdm_bak_* ]"
+
+    install:transaction_commit
+} 1>/dev/null
+
+test_backup_installed_file_2() {
+    install:transaction_start "$db_name"
+    install:link_or_file symlink file1 link1 "$(id -u)" "$(id -g)" 755
+    install:transaction_commit
+
+    # remove source file
+    rm file1
+    assert_fail "[ -f file1 ]"
+
+    install:transaction_start "$db_name"
+    install:backup_if_not_installed link1
+    assert_equals 0 $?
+
+    # link1 should be backed up, if source file is removed (not installed anymore)
+    assert_fail "[ -L link1 ]"
+    assert "[ -L link1.bdm_bak_* ]"
+
+    install:transaction_commit
+} 1>/dev/null
+
+test_backup_installed_modified_file() {
+    install:transaction_start "$db_name"
+    install:link_or_file file file1 file1_copy "$(id -u)" "$(id -g)" 755
+    install:transaction_commit
+
+    # modify the destination file
+    echo "some spice" >> file1_copy
+
+    install:transaction_start "$db_name"
+    install:backup_if_not_installed file1_copy
+    assert_equals 0 $?
+
+    # link1 should be backed up, if target file is no longer managed by bdm
+    assert_fail "[ -f file1_copy ]"
+    assert "[ -f file1_copy.bdm_bak_* ]"
+
+    install:transaction_commit
+} 1>/dev/null
+
+test_backup_within_transaction() {
+    install:transaction_start "$db_name"
+    install:link_or_file file file1 file1_copy "$(id -u)" "$(id -g)" 755
+
+    install:backup_if_not_installed file1_copy
+    assert_equals 0 $?
+
+    install:transaction_commit
+
+    # link1 should not be backed up, if tgt is installed within same transaction
+    assert "[ -f file1_copy ]"
+    assert_fail "[ -f file1_copy.bdm_bak_* ]"
 } 1>/dev/null
