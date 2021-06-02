@@ -1274,7 +1274,7 @@ _HELP_MESSAGE="\
     u*, uninstall
         No options available
 
-	s*, search
+    s*, search
         -t, --tags
         -d, --depends
 

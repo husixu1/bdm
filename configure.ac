@@ -2,7 +2,7 @@
 # Process this file with autoconf to produce a configure script.
 
 # BDM version number
-m4_define([bdm_VERSION], [0.1])
+m4_define([bdm_VERSION], [0.2])
 
 AC_PREREQ([2.71])
 AC_INIT([bdm], m4_defn([bdm_VERSION]), [husixu1 . at . hotmail.com])
